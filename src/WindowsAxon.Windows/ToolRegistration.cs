@@ -10,7 +10,8 @@ internal sealed class WindowsToolAttribute(string name,
                                            string group,
                                            RiskLevel risk = RiskLevel.Read,
                                            bool policyDriven = false,
-                                           int timeoutSeconds = 30) : Attribute
+                                           int timeoutSeconds = 30,
+                                           bool artifact = false) : Attribute
 {
     public string Name { get; } = name;
 
@@ -21,6 +22,9 @@ internal sealed class WindowsToolAttribute(string name,
     public bool PolicyDriven { get; } = policyDriven;
 
     public int TimeoutSeconds { get; } = timeoutSeconds;
+
+    /// <summary>A successful result is passed back to the main agent when a sub-agent runs the tool.</summary>
+    public bool Artifact { get; } = artifact;
 }
 
 public static class ToolRegistration
@@ -42,7 +46,8 @@ public static class ToolRegistration
                         tool.Group,
                         tool.Risk,
                         tool.PolicyDriven,
-                        TimeSpan.FromSeconds(tool.TimeoutSeconds));
+                        TimeSpan.FromSeconds(tool.TimeoutSeconds),
+                        tool.Artifact);
         }
     }
 

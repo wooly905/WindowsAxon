@@ -18,7 +18,8 @@ public sealed class ToolCallAudit
                          string arguments,
                          string risk,
                          string decision,
-                         string? callId)
+                         string? callId,
+                         string? agent = null)
     {
         _audit = audit;
         _entry = new AuditEntry(DateTimeOffset.Now,
@@ -30,7 +31,8 @@ public sealed class ToolCallAudit
                                 decision,
                                 null,
                                 CallId: string.IsNullOrEmpty(callId) ? Guid.NewGuid().ToString("N") : callId,
-                                Status: "started");
+                                Status: "started",
+                                Agent: agent);
         _started = Stopwatch.GetTimestamp();
         _audit.Write(_entry);
     }

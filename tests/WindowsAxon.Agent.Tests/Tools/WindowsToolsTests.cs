@@ -1,5 +1,6 @@
 using System.Text.Json;
 using WindowsAxon.Agent.Approval;
+using WindowsAxon.Agent.SubAgents;
 using WindowsAxon.Agent.Tools;
 using WindowsAxon.Agent.Undo;
 using WindowsAxon.Windows;
@@ -331,6 +332,40 @@ public sealed class WindowsToolsTests : IAsyncDisposable
     [InlineData("Bitwarden")]
     [InlineData("mstsc")]
     public void Desktop_controls_reject_protected_applications(string name) => Assert.Throws<UnauthorizedAccessException>(() => UiSafety.CheckProcess(name));
+
+    [Fact]
+    public void Every_tool_belongs_to_the_main_agent_or_to_a_sub_agent()
+    {
+        var catalog = new ToolCatalog();
+        using var tools = new WindowsToolSet(catalog,
+                                             Substitute.For<IChatClient>(),
+                                             _folder,
+                                             "test",
+                                             _ => throw new ArgumentException("No window"),
+                                             () =>
+                                             {
+                                             },
+                                             _ =>
+                                             {
+                                             });
+
+        foreach (var entry in catalog.Entries)
+        {
+            Assert.True(SubAgentCatalog.MainGroups.Contains(entry.Group) || SubAgentCatalog.All.Any(a => a.Includes(entry)),
+                        $"{entry.Name} has no agent");
+        }
+
+        foreach (var agent in SubAgentCatalog.All)
+        {
+            Assert.InRange(catalog.Entries.Count(agent.Includes), 1, 14);
+        }
+
+        var paintSave = catalog.Find("paint_save")!;
+        Assert.Equal(["paint"], SubAgentCatalog.All.Where(a => a.Includes(paintSave)).Select(a => a.Name));
+        Assert.True(SubAgentCatalog.Find("desktop")!.Includes(catalog.Find("ui_click")!));
+        Assert.Equal(["browser_open", "fs_find_files", "script_create"],
+                     catalog.Entries.Where(e => e.Artifact).Select(e => e.Name).Order());
+    }
 
     [Fact]
     public void Catalog_registers_every_planned_group_and_sensitive_actions_remain_guarded()

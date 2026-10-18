@@ -3,7 +3,8 @@ using WindowsAxon.Agent.Settings;
 using WindowsAxon.Eval;
 
 // Usage: WindowsAxon.Eval --config <settings.json> [--cases eval/cases] [--tools eval/tools.json] [--skills skills]
-//        [--args-schema PerTool|Free] [--docs] [--small-model] [--out eval/results]
+//        [--args-schema PerTool|Free] [--tool-selection Groups|All|SubAgents] [--docs] [--small-model]
+//        [--out eval/results]
 var options = ParseArgs(args);
 if (!options.TryGetValue("config", out var configPath))
 {
@@ -19,6 +20,17 @@ if (options.TryGetValue("args-schema", out var argsSchema))
         Chat = settings.Chat with
         {
             ArgsSchema = Enum.Parse<ArgsSchemaMode>(argsSchema, ignoreCase: true)
+        }
+    };
+}
+
+if (options.TryGetValue("tool-selection", out var toolSelection))
+{
+    settings = settings with
+    {
+        Chat = settings.Chat with
+        {
+            ToolSelection = Enum.Parse<ToolSelectionMode>(toolSelection, ignoreCase: true)
         }
     };
 }
@@ -50,9 +62,9 @@ foreach (var r in summary.Results)
 var smallModel = options.ContainsKey("small-model");
 var passed = summary.PassesM1Gate(smallModel);
 Console.WriteLine();
-Console.WriteLine($"Model {settings.Chat.Model} ({settings.Chat.StepMode}, args {settings.Chat.ArgsSchema}), {summary.Cases} cases");
+Console.WriteLine($"Model {settings.Chat.Model} ({settings.Chat.StepMode}, args {settings.Chat.ArgsSchema}, tools {settings.Chat.ToolSelection}), {summary.Cases} cases");
 Console.WriteLine($"Selection {summary.SelectionAccuracy:P0}  First tool {summary.FirstToolAccuracy:P0}  Success {summary.TaskSuccess:P0}  Invalid steps {summary.InvalidStepRate:P1}  Unapproved {summary.Unapproved}");
-Console.WriteLine($"Average steps {summary.AverageSteps:F1}  Average time {summary.AverageSeconds:F1}s (recorded, not a gate)");
+Console.WriteLine($"Average steps {summary.AverageSteps:F1}  Average time {summary.AverageSeconds:F1}s  Average main context {summary.AverageMainContextTokens:F0} tokens (recorded, not a gate)");
 Console.WriteLine($"M1 gate: {(passed ? "PASS" : "FAIL")}");
 
 var outFolder = options.GetValueOrDefault("out", "eval/results");

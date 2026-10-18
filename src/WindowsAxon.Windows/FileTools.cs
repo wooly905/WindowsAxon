@@ -33,7 +33,7 @@ public sealed class FileTools(UndoJournal journal, string session) : IUndoRestor
             .ToArray();
     }
 
-    [WindowsTool("fs_find_files", "files", timeoutSeconds: 60)]
+    [WindowsTool("fs_find_files", "files", timeoutSeconds: 60, artifact: true)]
     [Description("Find files under root by filename pattern, minimum size, and optional modifiedAfter ISO timestamp. Skips symbolic links and inaccessible folders. Maximum 200 results.")]
     public object Find(string root,
                        string pattern = "*",

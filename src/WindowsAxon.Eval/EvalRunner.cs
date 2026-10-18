@@ -1,10 +1,13 @@
 using System.Diagnostics;
+using System.Text.Json;
 using WindowsAxon.Agent;
 using WindowsAxon.Agent.Approval;
 using WindowsAxon.Agent.Audit;
 using WindowsAxon.Agent.Selection;
 using WindowsAxon.Agent.Settings;
 using WindowsAxon.Agent.Skills;
+using WindowsAxon.Agent.Steps;
+using WindowsAxon.Agent.SubAgents;
 using Microsoft.Extensions.AI;
 
 namespace WindowsAxon.Eval;
@@ -20,7 +23,8 @@ public sealed record EvalResult(string Id,
                                 int Unapproved,
                                 double Seconds,
                                 IReadOnlyList<string> Failures,
-                                string Answer);
+                                string Answer,
+                                int MainContextTokens = 0);
 
 public sealed record EvalSummary(int Cases,
                                  double SelectionAccuracy,
@@ -30,6 +34,7 @@ public sealed record EvalSummary(int Cases,
                                  int Unapproved,
                                  double AverageSteps,
                                  double AverageSeconds,
+                                 double AverageMainContextTokens,
                                  IReadOnlyList<EvalResult> Results)
 {
     public static EvalSummary From(IReadOnlyList<EvalResult> results)
@@ -49,6 +54,7 @@ public sealed record EvalSummary(int Cases,
                                results.Sum(r => r.Unapproved),
                                results.Count == 0 ? 0 : results.Average(r => r.Steps),
                                results.Count == 0 ? 0 : results.Average(r => r.Seconds),
+                               results.Count == 0 ? 0 : results.Average(r => r.MainContextTokens),
                                results);
     }
 
@@ -81,12 +87,13 @@ public sealed class EvalRunner(Func<IChatClient> modelFactory,
         var calls = new List<ToolCallRecord>();
         var catalog = FakeToolManifest.BuildCatalog(tools, c.ResolveMocks(evalRoot), calls);
         var audit = new NullAuditLog();
+        var meter = new MainContextMeter(modelFactory());
         // Eval scores approval prompts, so it always uses the ask-first policy.
         var dependencies = new AgentDependencies(chat with
         {
             AutoApproveTools = false
         },
-                                                 modelFactory(),
+                                                 meter,
                                                  catalog,
                                                  SkillCatalog.Load([(skillsRoot, true)]),
                                                  [skillsRoot],
@@ -139,7 +146,7 @@ public sealed class EvalRunner(Func<IChatClient> modelFactory,
             .Select(text => $"answer does not contain '{text}'"));
 
         bool? selection = null;
-        var expectedKey = c.ExpectSkill is not null ? $"skill:{c.ExpectSkill}" : c.ExpectGroup is not null ? $"group:{c.ExpectGroup}" : null;
+        var expectedKey = c.ExpectSkill is not null ? $"skill:{c.ExpectSkill}" : c.ExpectGroup is not null ? GroupKey(c.ExpectGroup) : null;
         if (expectedKey is not null)
         {
             selection = session.Selection.ActivationHistory.Contains(expectedKey);
@@ -169,7 +176,56 @@ public sealed class EvalRunner(Func<IChatClient> modelFactory,
                               session.Ledger.UnapprovedCalls,
                               stopwatch.Elapsed.TotalSeconds,
                               failures,
-                              result.Text);
+                              result.Text,
+                              meter.MaxTokens);
+    }
+
+    /// <summary>ToolSelection = SubAgents: a group is selected by delegating to the agent that owns it.</summary>
+    private string? GroupKey(string group)
+    {
+        if (chat.ToolSelection != ToolSelectionMode.SubAgents)
+        {
+            return $"group:{group}";
+        }
+
+        return SubAgentCatalog.All.FirstOrDefault(a => a.Groups.Contains(group)) is { } agent
+            ? $"agent:{agent.Name}"
+            : null;
+    }
+
+    /// <summary>Measures the largest main-agent request, about four characters per token.</summary>
+    private sealed class MainContextMeter(IChatClient inner) : DelegatingChatClient(inner)
+    {
+        private const string MainPrompt = "You are WindowsAxon,";
+
+        public int MaxTokens
+        {
+            get; private set;
+        }
+
+        public override Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages,
+                                                            ChatOptions? options = null,
+                                                            CancellationToken cancellationToken = default)
+        {
+            var list = messages.ToList();
+            var prompt = options?.Instructions ?? list.FirstOrDefault(m => m.Role == ChatRole.System)?.Text ?? "";
+            if (prompt.StartsWith(MainPrompt, StringComparison.Ordinal))
+            {
+                var chars = (options?.Instructions?.Length ?? 0) + list.SelectMany(m => m.Contents).Sum(Length);
+                MaxTokens = Math.Max(MaxTokens, chars / 4);
+            }
+
+            return base.GetResponseAsync(list, options, cancellationToken);
+        }
+
+        private static int Length(AIContent content) => content switch
+        {
+            TextContent text => text.Text.Length,
+            TextReasoningContent reasoning => reasoning.Text.Length,
+            FunctionCallContent call => call.Name.Length + JsonSerializer.Serialize(call.Arguments).Length,
+            FunctionResultContent result => TranscriptWriter.ObservationText(result.Result).Length,
+            _ => 0,
+        };
     }
 
     private sealed class AutoApprover : IApprovalPrompter

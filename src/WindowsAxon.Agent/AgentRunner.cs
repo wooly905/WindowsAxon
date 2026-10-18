@@ -1,5 +1,3 @@
-using System.Text.Json;
-using WindowsAxon.Agent.Approval;
 using WindowsAxon.Agent.Audit;
 using WindowsAxon.Agent.Steps;
 using Microsoft.Agents.AI;
@@ -39,6 +37,7 @@ public sealed class AgentRunner(WindowsAxonSession session, IApprovalPrompter ap
         }
 
         session.Selection.AwaitingReply = false;
+        session.Approvals.Prompter = approvals;
         var messages = new List<ChatMessage>();
         if (_unanswered is { Count: > 0 } unanswered)
         {
@@ -57,22 +56,12 @@ public sealed class AgentRunner(WindowsAxonSession session, IApprovalPrompter ap
             var retriedEmptyResponse = false;
             while (true)
             {
-                while (response.Messages.SelectMany(m => m.Contents)
-                    .OfType<ToolApprovalRequestContent>()
-                    .ToList() is { Count: > 0 } requests)
-                {
-                    _unanswered = requests;
-                    var answers = new List<AIContent>();
-                    foreach (var request in requests)
-                    {
-                        answers.Add(await DecideAsync(request, cancellationToken));
-                    }
-
-                    response = await session.Agent.RunAsync(new ChatMessage(ChatRole.User, answers),
-                                                            session.Session,
-                                                            cancellationToken: cancellationToken);
-                    _unanswered = null;
-                }
+                response = await session.Approvals.ResolveAsync(session.Agent,
+                                                                session.Session,
+                                                                response,
+                                                                requests => _unanswered = requests,
+                                                                null,
+                                                                cancellationToken);
 
                 if (string.IsNullOrWhiteSpace(response.Text))
                 {
@@ -120,44 +109,5 @@ public sealed class AgentRunner(WindowsAxonSession session, IApprovalPrompter ap
                                  $"The model service is busy or not available. {reason}",
                                  session.Selection.StepCount);
         }
-    }
-
-    private async Task<AIContent> DecideAsync(ToolApprovalRequestContent request, CancellationToken cancellationToken)
-    {
-        var call = (FunctionCallContent)request.ToolCall;
-        var decision = await Task.Run(() => session.Policy.Decide(call), cancellationToken)
-            .WaitAsync(cancellationToken);
-
-        bool approved;
-        string label;
-        if (decision.Outcome == ApprovalOutcome.AutoApprove)
-        {
-            approved = true;
-            label = "auto-approved";
-        }
-        else
-        {
-            var answer = await approvals.AskAsync(call, decision, cancellationToken);
-            approved = answer != ApprovalAnswer.Deny;
-            label = approved ? "approved" : "denied";
-            if (answer == ApprovalAnswer.AllowForConversation && decision.AllowForConversation)
-            {
-                session.Policy.AllowForConversation(call.Name);
-            }
-        }
-
-        session.Ledger.Record(call.CallId, approved);
-        audit.Write(new AuditEntry(DateTimeOffset.Now,
-                                   "approval",
-                                   session.Ledger.CurrentRequest,
-                                   call.Name,
-                                   JsonSerializer.Serialize(call.Arguments),
-                                   session.Policy.RiskOf(call.Name)?.ToString() ?? "Unknown",
-                                   label,
-                                   null,
-                                   CallId: call.CallId,
-                                   Status: label));
-
-        return request.CreateResponse(approved, approved ? null : "The user denied this action.");
     }
 }

@@ -46,6 +46,11 @@ public sealed class WindowsAxonSession
         get; init;
     }
 
+    public required ApprovalLoop Approvals
+    {
+        get; init;
+    }
+
     public required IReadOnlyList<AITool> Tools
     {
         get; init;

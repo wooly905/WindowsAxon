@@ -34,7 +34,7 @@ public sealed class ScriptTools(IChatClient model, string dataFolder, string ses
         }
     }
 
-    [WindowsTool("script_create", "scripts", timeoutSeconds: 120)]
+    [WindowsTool("script_create", "scripts", timeoutSeconds: 120, artifact: true)]
     [Description("Generate a PowerShell or Python script for a task that other tools cannot perform. Checks syntax and saves it for review; does not execute it. Returns its ID, summary, packages, and code.")]
     public async Task<object> Create(string language, string task, CancellationToken cancellationToken)
     {

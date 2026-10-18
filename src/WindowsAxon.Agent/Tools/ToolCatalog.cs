@@ -7,7 +7,8 @@ public sealed record ToolEntry(string Name,
                                RiskLevel Risk,
                                bool PolicyDriven,
                                TimeSpan Timeout,
-                               AIFunction Function)
+                               AIFunction Function,
+                               bool Artifact = false)
 {
     public bool NeedsApproval => PolicyDriven || Risk >= RiskLevel.Change;
 }
@@ -39,7 +40,8 @@ public sealed class ToolCatalog
                     string group,
                     RiskLevel risk,
                     bool policyDriven = false,
-                    TimeSpan? timeout = null)
+                    TimeSpan? timeout = null,
+                    bool artifact = false)
     {
         ArgumentNullException.ThrowIfNull(function);
         ArgumentException.ThrowIfNullOrWhiteSpace(group);
@@ -49,22 +51,27 @@ public sealed class ToolCatalog
             throw new InvalidOperationException($"Tool '{function.Name}' is already registered.");
         }
 
-        _entries.Add(new ToolEntry(function.Name, group, risk, policyDriven, timeout ?? DefaultTimeout, function));
+        _entries.Add(new ToolEntry(function.Name,
+                                   group,
+                                   risk,
+                                   policyDriven,
+                                   timeout ?? DefaultTimeout,
+                                   function,
+                                   artifact));
     }
 
     public ToolEntry? Find(string name) => _entries.FirstOrDefault(e => e.Name == name);
 
-    public IReadOnlyList<string> ToolsInGroup(string group) => _entries.Where(e => e.Group == group).Select(e => e.Name)
-        .ToList();
+    public IReadOnlyList<string> ToolsInGroup(string group) => _entries.Where(e => e.Group == group).Select(e => e.Name).ToList();
 
     public bool IsBaseTool(string name) => ExtraBaseToolNames.Contains(name) || Find(name)?.Group == BaseGroup;
 
-    public IList<AITool> BuildAgentTools(Func<ToolEntry, AIFunction> wrap)
+    public IList<AITool> BuildAgentTools(Func<ToolEntry, AIFunction> wrap, Func<ToolEntry, bool>? include = null)
     {
-        return _entries.Select(entry =>
+        return [.. _entries.Where(entry => include?.Invoke(entry) != false).Select(entry =>
         {
             var wrapped = wrap(entry);
             return entry.NeedsApproval ? new ApprovalRequiredAIFunction(wrapped) : (AITool)wrapped;
-        }).ToList();
+        })];
     }
 }

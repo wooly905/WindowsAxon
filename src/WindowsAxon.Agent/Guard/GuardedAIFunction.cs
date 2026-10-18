@@ -2,6 +2,7 @@ using System.Text.Json;
 using WindowsAxon.Agent.Audit;
 using WindowsAxon.Agent.Selection;
 using WindowsAxon.Agent.Steps;
+using WindowsAxon.Agent.SubAgents;
 using WindowsAxon.Agent.Tools;
 using Microsoft.Extensions.AI;
 
@@ -12,7 +13,8 @@ public sealed class GuardedAIFunction(ToolEntry entry,
                                       ToolSelectionState state,
                                       CallTracker tracker,
                                       ApprovalLedger ledger,
-                                      IAuditLog audit)
+                                      IAuditLog audit,
+                                      SubAgentTrace? trace = null)
     : DelegatingAIFunction(entry.Function)
 {
     public const int MaxObservationChars = 1500;
@@ -36,7 +38,8 @@ public sealed class GuardedAIFunction(ToolEntry entry,
                                      argumentsJson,
                                      entry.Risk.ToString(),
                                      decision,
-                                     callId);
+                                     callId,
+                                     trace?.Agent);
 
         if (!state.IsActive(entry.Name))
         {
@@ -93,6 +96,7 @@ public sealed class GuardedAIFunction(ToolEntry entry,
         }
 
         call.Complete(status, success, text, error);
+        trace?.RecordCall(entry, argumentsJson, status, text);
         var observation = CardNumberMasker.Mask(text);
         if (error is not null && status == "failed")
         {

@@ -71,6 +71,36 @@ public class EvalRunnerTests
     }
 
     [Fact]
+    public async Task Sub_agents_mode_scores_the_group_by_its_agent_and_measures_the_main_context()
+    {
+        var model = new ScriptedChatClient()
+            .Reply(Step("delegate", """{"agent":"config","task":"Use dark mode."}"""))
+            .Reply(Step("theme_set_mode", """{"mode":"dark"}"""))
+            .Reply(Final("Dark mode is on."))
+            .Reply(Final("Dark mode is on."));
+        var runner = new EvalRunner(() => model,
+                                    new ChatSettings { ToolSelection = ToolSelectionMode.SubAgents },
+                                    FakeToolManifest.Load(RepoPaths.File("eval/tools.json")),
+                                    RepoPaths.File("skills"),
+                                    RepoPaths.File("eval"),
+                                    docsAvailable: false);
+        var c = new EvalCase
+        {
+            Id = "t4",
+            Request = "use dark mode",
+            ExpectGroup = "personalize",
+            ExpectToolsAll = ["theme_set_mode"],
+        };
+
+        var result = await runner.RunCaseAsync(c, Ct);
+
+        Assert.True(result.Success, string.Join("; ", result.Failures));
+        Assert.True(result.SelectionCorrect);
+        Assert.Equal(1, result.Approvals);
+        Assert.InRange(result.MainContextTokens, 100, 10_000);
+    }
+
+    [Fact]
     public async Task Ask_user_is_answered_with_the_case_replies()
     {
         var model = new ScriptedChatClient()

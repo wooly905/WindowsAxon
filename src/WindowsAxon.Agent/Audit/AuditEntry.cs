@@ -14,4 +14,5 @@ public sealed record AuditEntry(DateTimeOffset Time,
                                 string? Status = null,
                                 double? DurationMs = null,
                                 string? Result = null,
-                                string? Error = null);
+                                string? Error = null,
+                                string? Agent = null);

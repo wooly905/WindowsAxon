@@ -183,7 +183,7 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
         return uri;
     }
 
-    [WindowsTool("browser_open", "browser", timeoutSeconds: 60)]
+    [WindowsTool("browser_open", "browser", timeoutSeconds: 60, artifact: true)]
     [Description("Open an http or https URL in WindowsAxon's separate, visible browser profile. The browser runs independently and stays open after WindowsAxon disconnects or exits. newTab opens a new tab. The user handles sign-in.")]
     public async Task<string> Open(string url, bool newTab = false, CancellationToken cancellationToken = default)
     {

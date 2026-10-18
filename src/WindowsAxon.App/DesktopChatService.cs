@@ -237,7 +237,7 @@ appTools,
             inner.Write(entry);
             if (entry.Kind == "call_start")
             {
-                toolStarted(entry.Tool);
+                toolStarted(entry.Agent is null ? entry.Tool : $"{entry.Agent}: {entry.Tool}");
             }
         }
     }
