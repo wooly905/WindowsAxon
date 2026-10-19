@@ -131,11 +131,15 @@ public sealed class WindowsToolsTests : IAsyncDisposable
         var files = new FileTools(Journal, "test");
         var before = files.ReadCurrent(path);
         var owner = files.AclGet(path);
-        Assert.Contains(System.Security.Principal.WindowsIdentity.GetCurrent().Name, owner);
+        var ownerSddl = owner.Split('\n')[^1];
+        var expectedOwner = new System.Security.AccessControl.RawSecurityDescriptor(ownerSddl)
+            .Owner!
+            .Translate(typeof(System.Security.Principal.NTAccount))
+            .Value;
+        Assert.StartsWith($"Owner: {expectedOwner}\n", owner);
         files.AclSet(path, System.Security.Principal.WindowsIdentity.GetCurrent().Name, "Read", inherit: folder);
         Assert.Contains("Restored", new UndoTools(Journal, [files], "test").UndoLast());
         Assert.Equal(before, files.ReadCurrent(path));
-        var ownerSddl = owner.Split('\n')[^1];
         var currentSddl = files.AclGet(path).Split('\n')[^1];
         Assert.Equal(new System.Security.AccessControl.RawSecurityDescriptor(ownerSddl).Owner,
                      new System.Security.AccessControl.RawSecurityDescriptor(currentSddl).Owner);
