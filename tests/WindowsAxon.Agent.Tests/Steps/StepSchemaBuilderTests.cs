@@ -64,4 +64,16 @@ public class StepSchemaBuilderTests
         Assert.Equal("- net_ping(host: string, count?: integer): Ping a host.", lines[0]);
         Assert.Equal("- system_get_info(): OS version, CPU, RAM.", lines[1]);
     }
+
+    [Fact]
+    public void DescribeTools_keeps_the_group_list_of_enable_tools()
+    {
+        var enableTools = AIFunctionFactory.Create((string group) => "",
+                                                   "enable_tools",
+                                                   "Enable one tool group for this request. Groups:\nfiles: folder owner (acl_get)");
+
+        var text = StepSchemaBuilder.DescribeTools([enableTools]);
+
+        Assert.Contains("Groups:\nfiles: folder owner (acl_get)", text);
+    }
 }

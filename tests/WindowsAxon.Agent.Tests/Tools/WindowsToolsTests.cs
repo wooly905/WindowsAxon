@@ -131,13 +131,16 @@ public sealed class WindowsToolsTests : IAsyncDisposable
         var files = new FileTools(Journal, "test");
         var before = files.ReadCurrent(path);
         var owner = files.AclGet(path);
+        Assert.Contains(System.Security.Principal.WindowsIdentity.GetCurrent().Name, owner);
         files.AclSet(path, System.Security.Principal.WindowsIdentity.GetCurrent().Name, "Read", inherit: folder);
         Assert.Contains("Restored", new UndoTools(Journal, [files], "test").UndoLast());
         Assert.Equal(before, files.ReadCurrent(path));
-        Assert.Equal(new System.Security.AccessControl.RawSecurityDescriptor(owner).Owner,
-                     new System.Security.AccessControl.RawSecurityDescriptor(files.AclGet(path)).Owner);
-        Assert.Equal(new System.Security.AccessControl.RawSecurityDescriptor(owner).ControlFlags.HasFlag(System.Security.AccessControl.ControlFlags.DiscretionaryAclProtected),
-                     new System.Security.AccessControl.RawSecurityDescriptor(files.AclGet(path)).ControlFlags.HasFlag(System.Security.AccessControl.ControlFlags.DiscretionaryAclProtected));
+        var ownerSddl = owner.Split('\n')[^1];
+        var currentSddl = files.AclGet(path).Split('\n')[^1];
+        Assert.Equal(new System.Security.AccessControl.RawSecurityDescriptor(ownerSddl).Owner,
+                     new System.Security.AccessControl.RawSecurityDescriptor(currentSddl).Owner);
+        Assert.Equal(new System.Security.AccessControl.RawSecurityDescriptor(ownerSddl).ControlFlags.HasFlag(System.Security.AccessControl.ControlFlags.DiscretionaryAclProtected),
+                     new System.Security.AccessControl.RawSecurityDescriptor(currentSddl).ControlFlags.HasFlag(System.Security.AccessControl.ControlFlags.DiscretionaryAclProtected));
     }
 
     [Theory]

@@ -372,6 +372,25 @@ public class AgentRunnerTests
     }
 
     [Fact]
+    public async Task Repeated_identical_calls_end_with_a_forced_final_answer()
+    {
+        var ping = ToolStep("net_ping", """{"host":"1.1.1.1"}""");
+        var model = new ScriptedChatClient()
+            .Reply(ToolStep("enable_tools", """{"group":"network"}"""))
+            .Reply(ping)
+            .Reply(ping)
+            .Reply(ping)
+            .Reply(Final("The host answers."));
+        var (runner, _, audit, _) = await Create(model);
+
+        var result = await runner.RunAsync("is 1.1.1.1 up?", cancellationToken: Ct);
+
+        Assert.Equal(RunStatus.Answered, result.Status);
+        Assert.Equal("The host answers.", result.Text);
+        Assert.DoesNotContain(audit.Entries, e => e is { Kind: "response", Status: "empty" });
+    }
+
+    [Fact]
     public async Task Model_timeout_is_reported_as_failed()
     {
         var model = new ScriptedChatClient().ReplyWith((_, _) => throw new TaskCanceledException("The operation was cancelled because it exceeded the configured timeout."));

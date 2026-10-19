@@ -200,4 +200,18 @@ public class AgentFactoryTests
         Assert.DoesNotContain("final_answer", prompt);
         Assert.DoesNotContain("ask_user", prompt);
     }
+
+    [Fact]
+    public void System_and_orchestrator_prompts_require_powershell_before_ui_automation()
+    {
+        var system = Prompts.System(docsAvailable: false);
+        var orchestrator = Prompts.Orchestrator(docsAvailable: false, "- scripts: test");
+
+        Assert.Contains("script_create with language 'powershell', then script_run", system);
+        Assert.Contains("Do not answer with manual instructions", system);
+        Assert.Contains("first inspect it with a read tool", system);
+        Assert.Contains("If PowerShell is blocked by policy or lacks permission", system);
+        Assert.Contains("Do not give the user manual instructions", orchestrator);
+        Assert.Contains("delegate to the scripts agent to write and run a PowerShell script", orchestrator);
+    }
 }

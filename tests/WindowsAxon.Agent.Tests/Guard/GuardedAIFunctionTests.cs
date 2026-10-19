@@ -262,10 +262,18 @@ public class GuardedAIFunctionTests
     }
 
     [Fact]
-    public async Task Third_identical_call_terminates_the_loop()
+    public async Task Third_identical_call_forces_a_final_answer()
     {
+        var runs = 0;
         var catalog = new ToolCatalog();
-        catalog.Add(AIFunctionFactory.Create(() => "ok", "net_ping"), "network", RiskLevel.Read);
+        catalog.Add(AIFunctionFactory.Create(() =>
+        {
+            runs++;
+            return "ok";
+        },
+                                             "net_ping"),
+                    "network",
+                    RiskLevel.Read);
         var state = new ToolSelectionState(catalog, 14);
         state.Activate("group:network", ["net_ping"]);
         var tools = catalog.BuildAgentTools(e => new GuardedAIFunction(e,
@@ -276,6 +284,43 @@ public class GuardedAIFunctionTests
         var inner = new ScriptedChatClient().ReplyCall("net_ping")
             .ReplyCall("net_ping")
             .ReplyCall("net_ping")
+            .Reply("done");
+        using var client = new FunctionInvokingChatClient(inner);
+
+        var response = await client.GetResponseAsync([new ChatMessage(ChatRole.User, "go")],
+                                                     new ChatOptions { Tools = tools },
+                                                     Ct);
+
+        Assert.Equal(1, runs);
+        Assert.True(state.MustFinish);
+        var last = response.Messages.SelectMany(m => m.Contents).OfType<FunctionResultContent>().Last();
+        Assert.Equal("Stopped: the same action was repeated 3 times.", last.Result?.ToString());
+    }
+
+    [Fact]
+    public async Task Third_identical_sub_agent_call_terminates_without_setting_must_finish()
+    {
+        var runs = 0;
+        var catalog = new ToolCatalog();
+        catalog.Add(AIFunctionFactory.Create(() =>
+        {
+            runs++;
+            return "ok";
+        },
+                                             "net_ping"),
+                    "network",
+                    RiskLevel.Read);
+        var state = new ToolSelectionState(catalog, 14);
+        state.Activate("group:network", ["net_ping"]);
+        var tools = catalog.BuildAgentTools(e => new GuardedAIFunction(e,
+                                                                       state,
+                                                                       new CallTracker(),
+                                                                       new ApprovalLedger(),
+                                                                       new ListAuditLog(),
+                                                                       new WindowsAxon.Agent.SubAgents.SubAgentTrace("diagnostics")));
+        var inner = new ScriptedChatClient().ReplyCall("net_ping")
+            .ReplyCall("net_ping")
+            .ReplyCall("net_ping")
             .Reply("never");
         using var client = new FunctionInvokingChatClient(inner);
 
@@ -283,7 +328,9 @@ public class GuardedAIFunctionTests
                                                      new ChatOptions { Tools = tools },
                                                      Ct);
 
+        Assert.Equal(1, runs);
         Assert.Equal(3, inner.Calls.Count);
+        Assert.False(state.MustFinish);
         var last = response.Messages.SelectMany(m => m.Contents).OfType<FunctionResultContent>().Last();
         Assert.Equal("Stopped: the same action was repeated 3 times.", last.Result?.ToString());
     }

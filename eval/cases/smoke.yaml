@@ -58,3 +58,11 @@
   request: "open it"
   replies: ["paint"]
   expect_tools_all: [app_find, app_launch]
+
+- id: issue-001
+  request: "why can't I delete the folder of c:\\windows.old ?"
+  expect_tools_any: [acl_get, script_run]
+  mock:
+    script_create: "{\"Id\":\"script-1\",\"Summary\":\"Read owner and access rules of C:\\\\Windows.old\",\"Packages\":[],\"Code\":\"Get-Acl -LiteralPath 'C:\\\\Windows.old' | Format-List Owner,AccessToString\",\"Executed\":false}"
+    script_run: "Exit code 0. Owner: NT SERVICE\\TrustedInstaller. Access: Administrators Allow ReadAndExecute; SYSTEM Allow ReadAndExecute; Users Allow ReadAndExecute."
+  expect_answer_contains: ["TrustedInstaller"]

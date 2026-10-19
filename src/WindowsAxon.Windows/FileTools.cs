@@ -230,8 +230,23 @@ public sealed class FileTools(UndoJournal journal, string session) : IUndoRestor
 
     [WindowsTool("acl_get", "files")]
     [Description("Read a file or folder owner and access rules.")]
-    public string AclGet(string path) => Security(path)
-        .GetSecurityDescriptorSddlForm(AccessControlSections.Access | AccessControlSections.Owner);
+    public string AclGet(string path)
+    {
+        var security = Security(path);
+        var sddl = security.GetSecurityDescriptorSddlForm(AccessControlSections.Access | AccessControlSections.Owner);
+        try
+        {
+            if (security.GetOwner(typeof(SecurityIdentifier))?.Translate(typeof(NTAccount)) is NTAccount owner)
+            {
+                return $"Owner: {owner.Value}\n{sddl}";
+            }
+        }
+        catch (IdentityNotMappedException)
+        {
+        }
+
+        return sddl;
+    }
 
     [WindowsTool("acl_set", "files", RiskLevel.Danger)]
     [Description("Grant or remove one explicit Allow rule. rights: Read, ReadAndExecute, Modify, FullControl. Blocks protected folders and other users' profiles. Preserves ownership and inheritance.")]

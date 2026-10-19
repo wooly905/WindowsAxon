@@ -41,8 +41,12 @@ public static class StepSchemaBuilder
                 }
             }
 
+            // enable_tools lists its groups after the first sentence.
+            var description = tool.Name == "enable_tools"
+                ? tool.Description?.Trim() ?? ""
+                : FirstSentence(tool.Description);
             text.Append("- ").Append(tool.Name).Append('(').Append(string.Join(", ", parameters)).Append("): ")
-                .Append(FirstSentence(tool.Description)).Append('\n');
+                .Append(description).Append('\n');
         }
 
         return text.ToString();

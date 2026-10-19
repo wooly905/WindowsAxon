@@ -178,4 +178,28 @@ public class DelegateFunctionTests
         var main = string.Join("\n", model.Calls[1].Messages.Select(m => m.Text));
         Assert.Contains("Unknown agent 'printers'. Agents: diagnostics, config.", main);
     }
+
+    [Fact]
+    public async Task Sub_agent_repeated_calls_do_not_stop_the_orchestrator_from_delegating_again()
+    {
+        var ping = ToolStep("net_ping", """{"host":"1.1.1.1"}""");
+        var model = new ScriptedChatClient()
+            .Reply(Delegate("diagnostics", "Check 1.1.1.1."))
+            .Reply(ping)
+            .Reply(ping)
+            .Reply(ping)
+            .Reply(Delegate("config", "Set the wallpaper to C:\\\\b.jpg."))
+            .Reply(ToolStep("wallpaper_set", """{"path":"C:\\b.jpg"}"""))
+            .Reply(Final("Wallpaper updated."))
+            .Reply(Final("Fallback succeeded."));
+        var (runner, session, _, prompter) = await Create(model);
+        prompter.AskAsync(default!, default!, Ct).ReturnsForAnyArgs(ApprovalAnswer.Allow);
+
+        var result = await runner.RunAsync("check then fallback", cancellationToken: Ct);
+
+        Assert.Equal(RunStatus.Answered, result.Status);
+        Assert.Equal("Fallback succeeded.", result.Text);
+        Assert.False(session.Selection.MustFinish);
+        Assert.Equal(["agent:diagnostics", "agent:config"], session.Selection.ActivationHistory);
+    }
 }

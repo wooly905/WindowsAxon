@@ -56,7 +56,12 @@ public sealed class GuardedAIFunction(ToolEntry entry,
 
         if (repeat >= 3)
         {
-            if (context is not null)
+            if (trace is null)
+            {
+                // Terminate would end the turn with no text, which AgentRunner reports as an empty answer.
+                state.MustFinish = true;
+            }
+            else if (context is not null)
             {
                 context.Terminate = true;
             }

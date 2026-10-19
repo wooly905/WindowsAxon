@@ -29,7 +29,7 @@ public sealed class ScriptTools(IChatClient model, string dataFolder, string ses
             using var key = root.OpenSubKey("Software\\Policies\\Microsoft\\Windows\\PowerShell");
             if (key?.GetValue("ExecutionPolicy") is not null || key?.GetValue("EnableScripts") is not null)
             {
-                throw new UnauthorizedAccessException("An administrator PowerShell policy is configured. WindowsAxon will not run PowerShell scripts.");
+                throw new UnauthorizedAccessException("An administrator PowerShell policy is configured. WindowsAxon will not run PowerShell scripts. Do the task another way, for example in the application or Settings window.");
             }
         }
     }

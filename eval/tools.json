@@ -215,5 +215,68 @@
       ]
     },
     "output": "Dark mode is on. Undo is available."
+  },
+  {
+    "name": "acl_get",
+    "group": "files",
+    "risk": "Read",
+    "description": "Read a file or folder owner and access rules.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "output": "Owner: NT SERVICE\\TrustedInstaller\nO:S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464D:(A;OICI;FA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)(A;OICI;0x1200a9;;;BA)(A;OICI;0x1200a9;;;SY)(A;OICI;0x1200a9;;;BU)"
+  },
+  {
+    "name": "script_create",
+    "group": "scripts",
+    "risk": "Read",
+    "description": "Generate a PowerShell or Python script for a task that other tools cannot perform. Checks syntax and saves it for review; does not execute it.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "language": {
+          "type": "string",
+          "enum": [
+            "powershell",
+            "python"
+          ]
+        },
+        "task": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "language",
+        "task"
+      ]
+    },
+    "output": "{\"Id\":\"script-1\",\"Summary\":\"Script created\",\"Packages\":[],\"Code\":\"Write-Output 'ok'\",\"Executed\":false}"
+  },
+  {
+    "name": "script_run",
+    "group": "scripts",
+    "risk": "Danger",
+    "policyDriven": true,
+    "description": "Execute a previously created script after approval of its full code.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "output": "Exit code 0. ok"
   }
 ]

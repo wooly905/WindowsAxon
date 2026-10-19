@@ -11,7 +11,7 @@ public sealed class EnableToolsFunction : AIFunction
     private static readonly Dictionary<string, string> GroupDescriptions = new()
     {
         ["system"] = "system information, performance, disks, processes, services",
-        ["files"] = "list, find, read, copy, move, delete files; folder permissions",
+        ["files"] = "list, find, read, copy, move, delete files; folder owner and permissions (acl_get)",
         ["registry"] = "read and change HKCU registry values",
         ["printers"] = "printers, default printer, print queue",
         ["eventlog"] = "Windows event logs",
@@ -21,8 +21,8 @@ public sealed class EnableToolsFunction : AIFunction
         ["network"] = "network configuration, ping, DNS, ports",
         ["apps"] = "list apps, refresh the app index, find and install apps with winget",
         ["browser"] = "control a web page in Chrome or Edge",
-        ["desktop_ui"] = "control an app window; draw in Paint. Last resort: use only when the user asks to work in a window or no other group or script can do the task",
-        ["scripts"] = "write and run a PowerShell or Python script to read or change system information when no dedicated tool can do the task",
+        ["desktop_ui"] = "control an open app or Settings window (ui_snapshot, ui_click, ui_type, ui_press_keys); draw in Paint. Use when the user asks to work in a window or when a PowerShell script fails or cannot do the task",
+        ["scripts"] = "write and run a PowerShell or Python script (script_create, script_run) to read or change the system when no dedicated tool can do the task",
         ["utilities"] = "calculator, clipboard, undo changes",
         ["docs"] = "fetch documentation pages",
     };
