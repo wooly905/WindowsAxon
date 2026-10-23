@@ -438,6 +438,108 @@ public sealed class WindowsToolsTests : IAsyncDisposable
         }
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Docs_code_sample_arguments_reject_a_blank_query(string? query)
+    {
+        var error = Assert.Throws<ArgumentException>(() => DocsTools.CodeSampleArguments(query!, null));
+
+        Assert.Equal("Query is required.", error.Message);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Docs_code_sample_arguments_omit_a_blank_language(string? language)
+    {
+        var arguments = DocsTools.CodeSampleArguments("  azure functions timeout  ", language);
+
+        Assert.Equal("azure functions timeout", arguments["query"]);
+        Assert.False(arguments.ContainsKey("language"));
+    }
+
+    [Theory]
+    [InlineData("PowerShell", "powershell")]
+    [InlineData("  CSharp ", "csharp")]
+    [InlineData("php", "php")]
+    public void Docs_code_sample_arguments_canonicalize_language(string language, string canonical)
+    {
+        var arguments = DocsTools.CodeSampleArguments("query", language);
+
+        Assert.Equal("query", arguments["query"]);
+        Assert.Equal(canonical, arguments["language"]);
+        Assert.Equal(2, arguments.Count);
+    }
+
+    [Theory]
+    [InlineData("C#")]
+    [InlineData(" C# ")]
+    [InlineData("python3")]
+    [InlineData("csharp, python")]
+    public void Docs_code_sample_arguments_reject_an_unknown_language(string language)
+    {
+        var error = Assert.Throws<ArgumentException>(() => DocsTools.CodeSampleArguments("query", language));
+
+        Assert.Equal("language must be one of: csharp, javascript, typescript, python, powershell, azurecli, al, sql, java, kusto, cpp, go, rust, ruby, php.",
+                     error.Message);
+    }
+
+    [Fact]
+    public void Docs_code_sample_tool_name_is_the_learn_mcp_tool() =>
+        Assert.Equal("microsoft_code_sample_search", DocsTools.CodeSampleToolName);
+
+    [Fact]
+    public async Task Docs_code_search_shares_the_learn_approval_notice()
+    {
+        await using var docs = new DocsTools();
+        var call = new FunctionCallContent("call", "docs_code_search", new Dictionary<string, object?>());
+
+        Assert.True(docs.AppliesTo("docs_search"));
+        Assert.True(docs.AppliesTo("docs_fetch"));
+        Assert.True(docs.AppliesTo("docs_code_search"));
+        Assert.False(docs.AppliesTo("microsoft_code_sample_search"));
+
+        var decision = docs.Decide(call);
+
+        Assert.Equal(ApprovalOutcome.Ask, decision.Outcome);
+        Assert.False(decision.AllowForConversation);
+        Assert.Equal("Your documentation query, code-sample query, or article URL will be sent to Microsoft Learn.", decision.Note);
+        Assert.Equal(decision, docs.Decide(new FunctionCallContent("call", "docs_search", new Dictionary<string, object?>())));
+        Assert.Equal(decision, docs.Decide(new FunctionCallContent("call", "docs_fetch", new Dictionary<string, object?>())));
+    }
+
+    [Fact]
+    public void Docs_code_search_is_registered_in_the_docs_group()
+    {
+        var catalog = new ToolCatalog();
+        using var tools = new WindowsToolSet(catalog,
+                                             Substitute.For<IChatClient>(),
+                                             _folder,
+                                             "test",
+                                             _ => throw new ArgumentException("No window"),
+                                             () =>
+                                             {
+                                             },
+                                             _ =>
+                                             {
+                                             });
+
+        var entry = catalog.Find("docs_code_search");
+
+        Assert.NotNull(entry);
+        Assert.Equal("docs", entry!.Group);
+        Assert.Equal(RiskLevel.Read, entry.Risk);
+        Assert.True(entry.PolicyDriven);
+        Assert.Equal(TimeSpan.FromSeconds(60), entry.Timeout);
+        Assert.False(entry.Artifact);
+        Assert.Equal("Search official Microsoft code samples through its official MCP server. The query and optional language are sent to Microsoft.",
+                     entry.Function.Description);
+        Assert.True(tools.ApprovalRules.OfType<DocsTools>().Single().AppliesTo("docs_code_search"));
+    }
+
     private static IChatClient Writer(string code)
     {
         var model = Substitute.For<IChatClient>();

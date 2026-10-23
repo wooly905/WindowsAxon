@@ -9,6 +9,27 @@ namespace WindowsAxon.Windows;
 
 public sealed class DocsTools : IApprovalRule, IAsyncDisposable
 {
+    internal const string CodeSampleToolName = "microsoft_code_sample_search";
+
+    private static readonly string[] CodeSampleLanguages =
+    [
+        "csharp",
+        "javascript",
+        "typescript",
+        "python",
+        "powershell",
+        "azurecli",
+        "al",
+        "sql",
+        "java",
+        "kusto",
+        "cpp",
+        "go",
+        "rust",
+        "ruby",
+        "php"
+    ];
+
     private McpClient? _client;
     private bool _noticeAccepted;
 
@@ -67,12 +88,42 @@ public sealed class DocsTools : IApprovalRule, IAsyncDisposable
                     cancellationToken);
     }
 
-    public bool AppliesTo(string toolName) => toolName is "docs_search" or "docs_fetch";
+    [WindowsTool("docs_code_search", "docs", policyDriven: true, timeoutSeconds: 60)]
+    [Description("Search official Microsoft code samples through its official MCP server. The query and optional language are sent to Microsoft.")]
+    public Task<string> SearchCode(string query,
+                                   [Description("Optional. One of: csharp, javascript, typescript, python, powershell, azurecli, al, sql, java, kusto, cpp, go, rust, ruby, php. Omit to search every language.")] string? language = null,
+                                   CancellationToken cancellationToken = default) =>
+        Call(CodeSampleToolName, CodeSampleArguments(query, language), cancellationToken);
+
+    internal static Dictionary<string, object?> CodeSampleArguments(string query, string? language)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            throw new ArgumentException("Query is required.");
+        }
+
+        var arguments = new Dictionary<string, object?>
+        {
+            ["query"] = query.Trim()
+        };
+        if (string.IsNullOrWhiteSpace(language))
+        {
+            return arguments;
+        }
+
+        var canonical = CodeSampleLanguages.FirstOrDefault(name => name.Equals(language.Trim(),
+                                                                                StringComparison.OrdinalIgnoreCase))
+            ?? throw new ArgumentException("language must be one of: " + string.Join(", ", CodeSampleLanguages) + ".");
+        arguments["language"] = canonical;
+        return arguments;
+    }
+
+    public bool AppliesTo(string toolName) => toolName is "docs_search" or "docs_fetch" or "docs_code_search";
 
     public ApprovalDecision Decide(FunctionCallContent call) => _noticeAccepted
         ? new(ApprovalOutcome.AutoApprove, false, null) : new(ApprovalOutcome.Ask,
                                                               false,
-                                                              "Your documentation query or article URL will be sent to Microsoft Learn.");
+                                                              "Your documentation query, code-sample query, or article URL will be sent to Microsoft Learn.");
 
     public async ValueTask DisposeAsync()
     {
