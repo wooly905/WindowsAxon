@@ -184,8 +184,18 @@ public class AgentFactoryTests
     [Fact]
     public void System_prompt_has_the_docs_rule_only_when_docs_are_available()
     {
-        Assert.Contains("docs_search", Prompts.System(docsAvailable: true));
+        const string systemRule = "If you do not know how to do the task, use docs_search first. For an official Microsoft code sample, enable the docs group and call docs_code_search. For a full article, enable the docs group and call docs_fetch.";
+        const string orchestratorRule = "If you do not know how to do the task, use docs_search first. For an official Microsoft code sample, call docs_code_search. For a full article, call docs_fetch.";
+
+        Assert.Contains(systemRule, Prompts.System(docsAvailable: true));
+        Assert.Contains(systemRule, Prompts.System(docsAvailable: true, stepMode: StepMode.Native));
+        Assert.DoesNotContain("docs_code_search", Prompts.System(docsAvailable: false));
+        Assert.DoesNotContain("docs_code_search", Prompts.System(docsAvailable: false, stepMode: StepMode.Native));
         Assert.DoesNotContain("docs_search", Prompts.System(docsAvailable: false));
+        Assert.Contains(orchestratorRule, Prompts.Orchestrator(docsAvailable: true, "- scripts: test"));
+        Assert.Contains(orchestratorRule, Prompts.Orchestrator(docsAvailable: true, "- scripts: test", StepMode.Native));
+        Assert.DoesNotContain("enable the docs group", Prompts.Orchestrator(docsAvailable: true, "- scripts: test"));
+        Assert.DoesNotContain("docs_code_search", Prompts.Orchestrator(docsAvailable: false, "- scripts: test"));
         Assert.Contains("{skills}", Prompts.SkillsInstruction);
     }
 

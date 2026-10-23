@@ -24,7 +24,7 @@ public sealed class EnableToolsFunction : AIFunction
         ["desktop_ui"] = "control an open app or Settings window (ui_snapshot, ui_click, ui_type, ui_press_keys); draw in Paint. Use when the user asks to work in a window or when a PowerShell script fails or cannot do the task",
         ["scripts"] = "write and run a PowerShell or Python script (script_create, script_run) to read or change the system when no dedicated tool can do the task",
         ["utilities"] = "calculator, clipboard, undo changes",
-        ["docs"] = "fetch documentation pages",
+        ["docs"] = "fetch a learn.microsoft.com article and search official Microsoft code samples",
     };
 
     private readonly ToolCatalog _catalog;

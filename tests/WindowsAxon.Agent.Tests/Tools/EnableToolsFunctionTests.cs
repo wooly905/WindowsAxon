@@ -49,4 +49,15 @@ public class EnableToolsFunctionTests
 
         Assert.Equal("Unknown group 'wifi'. Groups: network, printers.", result?.ToString());
     }
+
+    [Fact]
+    public void Docs_group_description_mentions_code_samples()
+    {
+        var catalog = new ToolCatalog();
+        catalog.Add(AIFunctionFactory.Create(() => "", "docs_code_search"), "docs", RiskLevel.Read, policyDriven: true);
+        var function = new EnableToolsFunction(catalog, new ToolSelectionState(catalog, 14));
+
+        Assert.Contains("docs: fetch a learn.microsoft.com article and search official Microsoft code samples",
+                        function.Description);
+    }
 }

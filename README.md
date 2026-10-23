@@ -2,7 +2,7 @@
 
 WindowsAxon is a Windows 11 x64 application that accepts plain-text requests and runs them through an agent. The desktop interface uses WinUI 3 and CommunityToolkit.Mvvm.
 
-The desktop app uses a real model endpoint and 87 operational tools for Windows, files, registry, printers, event logs, personalization, devices, network, applications, utilities, browser automation, desktop controls, Paint, scripts, and Microsoft Learn. Tools are enabled by group as needed. The desktop app does not use evaluation fake tools.
+The desktop app uses a real model endpoint and 88 operational tools for Windows, files, registry, printers, event logs, personalization, devices, network, applications, utilities, browser automation, desktop controls, Paint, scripts, and Microsoft Learn. Tools are enabled by group as needed. The desktop app does not use evaluation fake tools.
 
 Applications are indexed from Windows AppsFolder. Packaged apps such as Paint are activated through Windows, and a visible process window is verified before reporting that the app opened. For other app types, the tool reports a launch request without claiming its window was verified. Closing a window uses the application's normal close flow, preserves save prompts, and reports success only after verifying that the window closed. Launching with files or command-line arguments is not supported.
 
@@ -77,7 +77,7 @@ Nothing is installed without selecting **Update**. If the network is unavailable
 
 ## Tool catalog
 
-The operational catalog has 87 tools. `load_skill`, `read_skill_resource`, and `enable_tools` provide skill and group selection.
+The operational catalog has 88 tools. `load_skill`, `read_skill_resource`, and `enable_tools` provide skill and group selection.
 
 | Group | Tools |
 |---|---|
@@ -86,7 +86,7 @@ The operational catalog has 87 tools. `load_skill`, `read_skill_resource`, and `
 | browser | `browser_open`, `browser_snapshot`, `browser_find`, `browser_read`, `browser_click`, `browser_type`, `browser_press`, `browser_scroll`, `browser_back`, `browser_tabs`, `browser_tab_select`, `browser_close` |
 | desktop_ui | `ui_focus_window`, `ui_snapshot`, `ui_click`, `ui_type`, `ui_press_keys`, `ui_drag`, `ui_read_text`, `paint_new_canvas`, `paint_draw_shape`, `paint_draw_free`, `paint_add_text`, `paint_save`, `ui_screenshot` |
 | devices | `volume_get`, `volume_set`, `brightness_set`, `power_plan_list`, `power_plan_set` |
-| docs | `docs_fetch` |
+| docs | `docs_code_search`, `docs_fetch` |
 | eventlog | `eventlog_list_logs`, `eventlog_query` |
 | files | `fs_list_dir`, `fs_find_files`, `fs_read_text`, `fs_copy`, `fs_move`, `fs_create_dir`, `fs_delete`, `acl_get`, `acl_set` |
 | network | `net_get_config`, `net_ping`, `net_dns_lookup`, `net_test_port` |
@@ -109,7 +109,7 @@ The operational catalog has 87 tools. `load_skill`, `read_skill_resource`, and `
 - Paint tools create canvases, draw shapes and freehand paths, add text, and save images through Paint's interface. Drawing requires the entire canvas to be visible. The adapter currently uses English control names where stable automation IDs are unavailable; other versions or languages may return an unsupported-control error. Saved files are checked for existence and image format.
 - PowerShell and Python scripts are generated in `%LOCALAPPDATA%\WindowsAxon\work\<session>`, checked for syntax, and shown in full before execution. Modified scripts are refused. Execution uses the current user's permissions, a 120-second timeout, a 1 GB Windows Job Object limit, and output capture capped at 1 MB per stream. This is process isolation, not a sandbox restricting file or network access. Review the code before allowing it. Administratively configured PowerShell execution policies prevent PowerShell tools from running.
 - `python_ensure` creates WindowsAxon's virtual environment and may install Python through winget after approval. `python_install_package` installs only into that environment. `winget_install` requests a current-user install; packages without that installation scope return an error.
-- `docs_search` and `docs_fetch` connect to Microsoft Learn MCP. The first call in each conversation requests approval to contact Microsoft Learn.
+- `docs_search`, `docs_fetch`, and `docs_code_search` connect to Microsoft Learn MCP. The first call in each conversation requests approval to contact Microsoft Learn.
 - Brightness requires a supported built-in display. Printer actions require installed printers. Tools return errors when required hardware, permissions, or command-line programs are unavailable.
 
 The UI provides an execution indicator, approval cards, and final results. Streaming steps, the first-run wizard, and the full Test connection checks remain later milestone work. The evaluation CLI continues to use simulated tools.

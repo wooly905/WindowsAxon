@@ -27,7 +27,7 @@ public static class Prompts
 
         if (docsAvailable)
         {
-            rules.Add("If you do not know how to do the task, use docs_search first.");
+            rules.Add("If you do not know how to do the task, use docs_search first. For an official Microsoft code sample, enable the docs group and call docs_code_search. For a full article, enable the docs group and call docs_fetch.");
         }
 
         rules.Add(stepMode == StepMode.Structured
@@ -64,7 +64,7 @@ public static class Prompts
 
         if (docsAvailable)
         {
-            rules.Add("If you do not know how to do the task, use docs_search first.");
+            rules.Add("If you do not know how to do the task, use docs_search first. For an official Microsoft code sample, call docs_code_search. For a full article, call docs_fetch.");
         }
 
         AddEndRules(rules, stepMode);
