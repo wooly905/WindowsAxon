@@ -130,9 +130,3 @@ The evaluation CLI remains available:
 ```powershell
 dotnet run --project src/WindowsAxon.Eval -- --config settings.local.json
 ```
-
-## Code Signing & Privacy Policy
-
-Free code signing is provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
-
-* **Privacy Policy:** This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. See [CODE_SIGNING.md](CODE_SIGNING.md) for details.
