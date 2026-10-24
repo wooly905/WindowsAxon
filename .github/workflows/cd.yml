@@ -24,6 +24,9 @@ jobs:
     # Only the repo owner may release, and only from main.
     if: github.triggering_actor == 'wooly905' && github.ref == 'refs/heads/main'
     runs-on: windows-latest
+    env:
+      # Step-level `if` cannot read secrets; signing is skipped until SignPath is configured.
+      SIGNPATH_TOKEN_PRESENT: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
     steps:
       - name: Require a successful CI run for this commit
         shell: pwsh
@@ -68,12 +71,38 @@ jobs:
           -p:BuildNumber=${{ env.BUILD_NUMBER }}
           -o publish
 
+      - name: Upload unsigned app
+        id: upload_unsigned
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-archive
+          path: publish/WindowsAxon.App.exe
+          if-no-files-found: error
+
+      - name: Submit signing request to SignPath
+        if: env.SIGNPATH_TOKEN_PRESENT == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORG_ID }}
+          project-slug: WindowsAxon
+          signing-policy-slug: release-signing
+          github-artifact-id: ${{ steps.upload_unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
       - name: Package release assets
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
+          $source = if ($env:SIGNPATH_TOKEN_PRESENT -eq 'true') { 'signed/WindowsAxon.App.exe' } else { 'publish/WindowsAxon.App.exe' }
+          if (-not (Test-Path $source)) {
+            Write-Error "Release binary not found: $source"
+            exit 1
+          }
+          Write-Host "Release binary: $source"
           $exe = "dist/WindowsAxon-$env:VERSION-win-x64.exe"
-          Copy-Item publish/WindowsAxon.App.exe $exe
+          Copy-Item $source $exe
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $(Split-Path $exe -Leaf)" | Set-Content "$exe.sha256" -Encoding ascii
 
