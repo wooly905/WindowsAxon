@@ -116,7 +116,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $notes = "Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/). See [CODE_SIGNING.md](https://github.com/$env:GITHUB_REPOSITORY/blob/main/CODE_SIGNING.md) for the code signing and privacy policy."
           gh release create "v$env:VERSION" dist/* `
             --target $env:RELEASE_SHA `
             --title "WindowsAxon $env:VERSION" `
+            --notes $notes `
             --generate-notes
