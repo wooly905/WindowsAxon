@@ -60,11 +60,12 @@ public sealed class DesktopSettingsTests : IDisposable
         service.SaveSettings("https://api.example.com/v1", "model-1", "test-preserve");
         var name = TrackKey(service);
 
-        service.SaveSettings("https://API.EXAMPLE.COM:443/v1/", "model-2");
+        service.SaveSettings("https://API.EXAMPLE.COM:443/v1/", "model-2", api: EndpointApi.Responses);
 
         Assert.Equal($"credential:{name}", service.Settings.ChatEndpoint.ApiKey);
         Assert.Equal("test-preserve", _secrets.Read(name));
         Assert.Equal("model-2", service.Settings.Chat.Model);
+        Assert.Equal(EndpointApi.Responses, service.Settings.ChatEndpoint.Api);
     }
 
     [Fact(Skip = "Windows Credential Manager requires Windows.", SkipUnless = nameof(IsWindows))]
@@ -164,6 +165,23 @@ public sealed class DesktopSettingsTests : IDisposable
         using var service = CreateService();
         service.SaveSettings("http://127.0.0.1:8000/v1", "model", "test-local-key");
         Assert.Equal("test-local-key", _secrets.Read(TrackKey(service)));
+    }
+
+    [Fact]
+    public void Responses_selection_persists_for_a_local_codex_endpoint()
+    {
+        using var service = CreateService();
+        service.SaveSettings("http://localhost:5168/v1", "gpt-6.1-sol", api: EndpointApi.Responses);
+
+        using var reloaded = CreateService();
+        reloaded.LoadSettings();
+        Assert.Equal(EndpointApi.Responses, reloaded.Settings.ChatEndpoint.Api);
+        Assert.True(reloaded.Settings.UsesResponsesApi);
+        Assert.Equal(StepMode.Native, reloaded.Settings.Chat.StepMode);
+        Assert.Null(reloaded.Settings.Chat.ReasoningEffortWhenThinkingOff);
+
+        reloaded.SaveSettings("http://localhost:5168/v1", "gpt-6.1-sol");
+        Assert.Equal(EndpointApi.Responses, reloaded.Settings.ChatEndpoint.Api);
     }
 
     [Fact(Skip = "Windows Credential Manager requires Windows.", SkipUnless = nameof(IsWindows))]

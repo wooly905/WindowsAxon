@@ -122,7 +122,11 @@ appTools,
         _model = null;
     }
 
-    public void SaveSettings(string baseUrl, string model, string apiKey = "", bool removeApiKey = false)
+    public void SaveSettings(string baseUrl,
+                             string model,
+                             string apiKey = "",
+                             bool removeApiKey = false,
+                             EndpointApi? api = null)
     {
         ValidateEndpoint(baseUrl);
         if (string.IsNullOrWhiteSpace(model))
@@ -151,19 +155,27 @@ appTools,
 
         var endpoints = new Dictionary<string, EndpointSettings>(Settings.Endpoints)
         {
-            [Settings.Chat.Endpoint] = Settings.ChatEndpoint with { BaseUrl = baseUrl, ApiKey = reference },
+            [Settings.Chat.Endpoint] = Settings.ChatEndpoint with
+            {
+                BaseUrl = baseUrl,
+                ApiKey = reference,
+                Api = api ?? Settings.ChatEndpoint.Api,
+            },
         };
         var updated = Settings with
         {
             Endpoints = endpoints,
             Chat = Settings.Chat with
             {
-                Model = model.Trim(),
-                StepMode = EndpointRules.IsRemote(baseUrl) && string.Equals(model.Trim(),
-                                                                            "auto",
-                                                                            StringComparison.OrdinalIgnoreCase)
-            ? StepMode.Native : Settings.Chat.StepMode,
-                ReasoningEffortWhenThinkingOff = EndpointRules.IsRemote(baseUrl)
+                Model = model.Trim()
+            },
+        };
+        updated = updated with
+        {
+            Chat = updated.Chat with
+            {
+                StepMode = updated.UsesResponsesApi ? StepMode.Native : Settings.Chat.StepMode,
+                ReasoningEffortWhenThinkingOff = (updated.IsChatRemote || updated.UsesResponsesApi)
             && Settings.Chat.ReasoningEffortWhenThinkingOff == "none"
             ? null : Settings.Chat.ReasoningEffortWhenThinkingOff,
             },

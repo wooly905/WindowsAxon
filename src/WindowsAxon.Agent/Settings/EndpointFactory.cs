@@ -18,9 +18,7 @@ public sealed class EndpointFactory(ModelSettings settings, ISecretStore secrets
         var endpoint = Settings.ChatEndpoint;
         var client = new OpenAIClient(new ApiKeyCredential(ResolveKey(endpoint) ?? "none"), // the SDK needs a value for servers without a key
             new OpenAIClientOptions { Endpoint = new Uri(endpoint.BaseUrl), NetworkTimeout = TimeSpan.FromMinutes(5) });
-        var useResponses = Settings.IsChatRemote && string.Equals(Settings.Chat.Model,
-                                                                  "auto",
-                                                                  StringComparison.OrdinalIgnoreCase);
+        var useResponses = Settings.UsesResponsesApi;
         IChatClient chat = useResponses
             ? client.GetResponsesClient().AsIChatClient(Settings.Chat.Model)
             : client.GetChatClient(Settings.Chat.Model).AsIChatClient();

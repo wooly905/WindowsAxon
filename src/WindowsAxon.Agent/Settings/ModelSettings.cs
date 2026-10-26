@@ -28,6 +28,11 @@ public sealed record ModelSettings
 
     public bool IsChatRemote => EndpointRules.IsRemote(ChatEndpoint.BaseUrl);
 
+    public bool UsesResponsesApi => ChatEndpoint.Api == EndpointApi.Responses
+        || (ChatEndpoint.Api == EndpointApi.Automatic
+            && IsChatRemote
+            && string.Equals(Chat.Model, "auto", StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Reads the "Models" section of a configuration JSON document.</summary>
     public static ModelSettings Load(string json)
     {

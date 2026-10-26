@@ -3,6 +3,8 @@ namespace WindowsAxon.Agent.Settings;
 
 public sealed record EndpointSettings
 {
+    public EndpointApi Api { get; init; } = EndpointApi.Automatic;
+
     public required string BaseUrl
     {
         get; init;

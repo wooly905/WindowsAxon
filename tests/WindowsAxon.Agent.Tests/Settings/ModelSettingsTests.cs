@@ -12,7 +12,7 @@ public class ModelSettingsTests
               "Models": {
                 "Endpoints": {
                   "local": { "BaseUrl": "http://localhost:11434/v1" },
-                  "cloud": { "BaseUrl": "https://api.example.com/v1", "ApiKey": "credential:WindowsAxon/cloud" }
+                  "cloud": { "BaseUrl": "https://api.example.com/v1", "ApiKey": "credential:WindowsAxon/cloud", "Api": "Responses" }
                 },
                 "Chat": { "Endpoint": "cloud", "Model": "m1", "ContextWindow": 8192, "StepMode": "Native", "ArgsSchema": "Free", "MaxActiveTools": 10 }
               }
@@ -22,6 +22,8 @@ public class ModelSettingsTests
         var settings = ModelSettings.Load(json);
 
         Assert.Equal("https://api.example.com/v1", settings.ChatEndpoint.BaseUrl);
+        Assert.Equal(EndpointApi.Responses, settings.ChatEndpoint.Api);
+        Assert.True(settings.UsesResponsesApi);
         Assert.Equal("m1", settings.Chat.Model);
         Assert.Equal(8192, settings.Chat.ContextWindow);
         Assert.Equal(StepMode.Native, settings.Chat.StepMode);
@@ -42,6 +44,8 @@ public class ModelSettingsTests
         Assert.Equal(14, settings.Chat.MaxActiveTools);
         Assert.False(settings.Chat.Thinking);
         Assert.False(settings.IsChatRemote);
+        Assert.Equal(EndpointApi.Automatic, settings.ChatEndpoint.Api);
+        Assert.False(settings.UsesResponsesApi);
     }
 
     [Fact]

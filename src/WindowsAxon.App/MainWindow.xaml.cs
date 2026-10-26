@@ -2,6 +2,7 @@ using System.Text.Json;
 using WindowsAxon.Agent;
 using WindowsAxon.Agent.Approval;
 using WindowsAxon.Agent.Selection;
+using WindowsAxon.Agent.Settings;
 using WindowsAxon.App.Updates;
 using Microsoft.Extensions.AI;
 using Microsoft.UI.Xaml;
@@ -304,6 +305,13 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
             PlaceholderText = "http://localhost:11434/v1"
         };
         var model = new TextBox { Header = "Model name", Text = _service.Settings.Chat.Model };
+        var api = new ComboBox
+        {
+            Header = "API",
+            ItemsSource = Enum.GetValues<EndpointApi>(),
+            SelectedItem = _service.Settings.ChatEndpoint.Api,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
         var apiKey = new PasswordBox
         {
             Header = "API key",
@@ -334,6 +342,7 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
         var content = new StackPanel { Spacing = 12 };
         content.Children.Add(endpoint);
+        content.Children.Add(api);
         content.Children.Add(model);
         content.Children.Add(apiKey);
         content.Children.Add(keyStatus);
@@ -364,7 +373,11 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
             var previousSettings = _service.Settings;
             try
             {
-                _service.SaveSettings(endpoint.Text, model.Text, apiKey.Password, removeKey.IsChecked == true);
+                _service.SaveSettings(endpoint.Text,
+                                      model.Text,
+                                      apiKey.Password,
+                                      removeKey.IsChecked == true,
+                                      (EndpointApi)api.SelectedItem);
                 ViewModel.SettingsChanged();
             }
             catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
