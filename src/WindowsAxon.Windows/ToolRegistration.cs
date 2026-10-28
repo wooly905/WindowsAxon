@@ -38,11 +38,17 @@ public static class ToolRegistration
                 continue;
             }
 
+            Action? cancel = provider switch
+            {
+                BrowserTools browser => browser.CancelPending,
+                WebTools web => web.Close,
+                _ => null
+            };
             catalog.Add(new WindowsFunction(AIFunctionFactory.Create(method,
                                                                      provider,
                                                                      tool.Name,
                                                                      method.GetCustomAttribute<DescriptionAttribute>()?.Description),
-                                            provider is BrowserTools browser ? browser.CancelPending : null),
+                                            cancel),
                         tool.Group,
                         tool.Risk,
                         tool.PolicyDriven,

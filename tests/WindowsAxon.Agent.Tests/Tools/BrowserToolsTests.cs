@@ -22,7 +22,11 @@ public sealed class BrowserToolsTests
         IBrowserContext? verificationContext = null;
         try
         {
-            var context = await BrowserTools.ConnectBrowserAsync(controller, profile, "msedge", headless: true);
+            var context = await BrowserTools.ConnectBrowserAsync(controller,
+                                                                  profile,
+                                                                  "msedge",
+                                                                  headless: true,
+                                                                  cancellationToken: TestContext.Current.CancellationToken);
             var page = context.Pages[0];
             await page.SetContentAsync("<h1>Independent browser</h1>");
             var tools = Attach(context, page);
@@ -37,7 +41,11 @@ public sealed class BrowserToolsTests
                 await tools.DisposeAsync();
             }
 
-            verificationContext = await BrowserTools.ConnectBrowserAsync(verifier, profile, "msedge", headless: true);
+            verificationContext = await BrowserTools.ConnectBrowserAsync(verifier,
+                                                                          profile,
+                                                                          "msedge",
+                                                                          headless: true,
+                                                                          cancellationToken: TestContext.Current.CancellationToken);
             Assert.Contains(verificationContext.Pages, p => !p.IsClosed);
             Assert.Equal("Independent browser", await verificationContext.Pages[0].Locator("h1").InnerTextAsync());
             var reconnected = Attach(verificationContext, verificationContext.Pages[0]);
@@ -47,7 +55,11 @@ public sealed class BrowserToolsTests
         }
         finally
         {
-            verificationContext ??= await BrowserTools.ConnectBrowserAsync(verifier, profile, "msedge", headless: true);
+            verificationContext ??= await BrowserTools.ConnectBrowserAsync(verifier,
+                                                                            profile,
+                                                                            "msedge",
+                                                                            headless: true,
+                                                                            cancellationToken: TestContext.Current.CancellationToken);
             var cleanup = await verificationContext.Browser!.NewBrowserCDPSessionAsync();
             await cleanup.SendAsync("Browser.close");
             for (var attempt = 0; attempt < 100; attempt++)

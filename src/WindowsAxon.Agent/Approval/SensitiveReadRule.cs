@@ -11,6 +11,8 @@ public sealed class SensitiveReadRule(bool endpointIsRemote, string endpointHost
         "ui_read_text",
         "browser_snapshot",
         "browser_find",
+        "web_search",
+        "web_read",
         "ui_snapshot",
         "ui_screenshot"
 ];

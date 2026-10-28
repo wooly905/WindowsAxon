@@ -4,6 +4,7 @@ using WindowsAxon.Agent.Selection;
 using WindowsAxon.Agent.Settings;
 using WindowsAxon.Agent.Skills;
 using WindowsAxon.Agent.Steps;
+using WindowsAxon.Agent.SubAgents;
 using WindowsAxon.Agent.Tests.Fakes;
 using WindowsAxon.Agent.Tools;
 using NSubstitute;
@@ -206,6 +207,7 @@ public class AgentFactoryTests
 
         Assert.Contains("Use the provided tools", prompt);
         Assert.Contains("reply directly to the user", prompt);
+        Assert.Contains("same language as the user's request", prompt);
         Assert.DoesNotContain("JSON step", prompt);
         Assert.DoesNotContain("final_answer", prompt);
         Assert.DoesNotContain("ask_user", prompt);
@@ -223,5 +225,22 @@ public class AgentFactoryTests
         Assert.Contains("If PowerShell is blocked by policy or lacks permission", system);
         Assert.Contains("Do not give the user manual instructions", orchestrator);
         Assert.Contains("delegate to the scripts agent to write and run a PowerShell script", orchestrator);
+        Assert.Contains("same language as the user's request", system);
+        Assert.Contains("same language as the user's request", orchestrator);
+        Assert.Contains("same language as the task", Prompts.SubAgent(SubAgentCatalog.Find("scripts")!));
+    }
+
+    [Fact]
+    public void Prompts_keep_web_lookup_hidden_and_browser_open_for_a_requested_page()
+    {
+        var system = Prompts.System(docsAvailable: false);
+        var orchestrator = Prompts.Orchestrator(docsAvailable: false, "- web: test");
+        var web = Prompts.SubAgent(SubAgentCatalog.Find("web")!);
+
+        Assert.Contains("enable the web group", system);
+        Assert.Contains("ask the user before using browser_open", system);
+        Assert.Contains("delegate to the web agent", orchestrator);
+        Assert.Contains("ask the user before opening the visible browser", orchestrator);
+        Assert.Contains("stay hidden", web);
     }
 }

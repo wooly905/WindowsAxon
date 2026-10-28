@@ -107,7 +107,14 @@ appTools,
         var force = _forceNewRequest;
         _forceNewRequest = false;
         using var stop = cancellationToken.Register(() => _toolSet?.StopBrowser());
-        return await _runner.RunAsync(text, forceNewRequest: force, cancellationToken: cancellationToken);
+        try
+        {
+            return await _runner.RunAsync(text, forceNewRequest: force, cancellationToken: cancellationToken);
+        }
+        finally
+        {
+            _toolSet?.CloseResearchBrowser();
+        }
     }
 
     public void StartNewRequest() => _forceNewRequest = true;

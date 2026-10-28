@@ -8,6 +8,7 @@ namespace WindowsAxon.Windows;
 public sealed class WindowsToolSet : IDisposable
 {
     private readonly BrowserTools _browser;
+    private readonly WebTools _web;
     private readonly DocsTools _docs;
 
     public IReadOnlyList<IApprovalRule> ApprovalRules
@@ -33,6 +34,7 @@ public sealed class WindowsToolSet : IDisposable
         var paint = new PaintTools(ui);
         var scripts = new ScriptTools(model, dataFolder, session);
         _browser = new BrowserTools(dataFolder);
+        _web = new WebTools(dataFolder);
         _docs = new DocsTools();
         foreach (var provider in new object[] {
             new SystemTools(),
@@ -42,6 +44,7 @@ public sealed class WindowsToolSet : IDisposable
             software,
             utilities,
             _browser,
+            _web,
             ui,
             new ScreenshotTools(ui),
             paint,
@@ -58,6 +61,7 @@ public sealed class WindowsToolSet : IDisposable
 
     public void Dispose()
     {
+        _web.Dispose();
         Task.Run(async () =>
         {
             await _browser.DisposeAsync();
@@ -65,7 +69,14 @@ public sealed class WindowsToolSet : IDisposable
         }).GetAwaiter().GetResult();
     }
 
-    public void StopBrowser() => _browser.CancelPending();
+    /// <summary>Closes the hidden research browser and leaves the visible browser windows open.</summary>
+    public void CloseResearchBrowser() => _web.Close();
+
+    public void StopBrowser()
+    {
+        _browser.CancelPending();
+        _web.Close();
+    }
 
     private sealed class UndoApprovalRule(UndoJournal journal) : IApprovalRule
     {

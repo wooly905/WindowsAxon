@@ -246,6 +246,10 @@ public sealed class WindowsToolsTests : IAsyncDisposable
     [InlineData("ui_snapshot", true)]
     [InlineData("ui_screenshot", false)]
     [InlineData("ui_screenshot", true)]
+    [InlineData("web_search", false)]
+    [InlineData("web_search", true)]
+    [InlineData("web_read", false)]
+    [InlineData("web_read", true)]
     public void Snapshots_use_the_sensitive_read_approval_gate(string name, bool remote)
     {
         var catalog = new ToolCatalog();
@@ -402,6 +406,7 @@ public sealed class WindowsToolsTests : IAsyncDisposable
             "apps",
             "utilities",
             "browser",
+            "web",
             "desktop_ui",
             "scripts",
             "docs"
@@ -421,6 +426,8 @@ public sealed class WindowsToolsTests : IAsyncDisposable
             "ui_click",
             "fs_read_text",
             "browser_read",
+            "web_search",
+            "web_read",
             "ui_read_text"
         })
         {

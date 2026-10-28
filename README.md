@@ -2,7 +2,7 @@
 
 WindowsAxon is a Windows 11 x64 application that accepts plain-text requests and runs them through an agent. The desktop interface uses WinUI 3 and CommunityToolkit.Mvvm.
 
-The desktop app uses a real model endpoint and 88 operational tools for Windows, files, registry, printers, event logs, personalization, devices, network, applications, utilities, browser automation, desktop controls, Paint, scripts, and Microsoft Learn. Tools are enabled by group as needed. The desktop app does not use evaluation fake tools.
+The desktop app uses a real model endpoint and 90 operational tools for Windows, files, registry, printers, event logs, personalization, devices, network, applications, utilities, browser automation, hidden web lookup, desktop controls, Paint, scripts, and Microsoft Learn. Tools are enabled by group as needed. The desktop app does not use evaluation fake tools.
 
 Applications are indexed from Windows AppsFolder. Packaged apps such as Paint are activated through Windows, and a visible process window is verified before reporting that the app opened. For other app types, the tool reports a launch request without claiming its window was verified. Closing a window uses the application's normal close flow, preserves save prompts, and reports success only after verifying that the window closed. Launching with files or command-line arguments is not supported.
 
@@ -81,7 +81,7 @@ Nothing is installed without selecting **Update**. If the network is unavailable
 
 ## Tool catalog
 
-The operational catalog has 88 tools. `load_skill`, `read_skill_resource`, and `enable_tools` provide skill and group selection.
+The operational catalog has 90 tools. `load_skill`, `read_skill_resource`, and `enable_tools` provide skill and group selection.
 
 | Group | Tools |
 |---|---|
@@ -101,6 +101,7 @@ The operational catalog has 88 tools. `load_skill`, `read_skill_resource`, and `
 | settings | `settings_open`, `control_panel_open`, `admin_tool_open` |
 | system | `system_get_info`, `system_get_performance`, `disk_get_usage`, `process_list`, `process_stop`, `service_list` |
 | utilities | `clipboard_get`, `clipboard_set`, `calc_evaluate`, `undo_list`, `undo_last` |
+| web | `web_search`, `web_read` |
 
 ## Tool behavior
 
@@ -108,6 +109,7 @@ The operational catalog has 88 tools. `load_skill`, `read_skill_resource`, and `
 - Registry writes affect HKCU only and cannot change policy keys. File deletion uses the Recycle Bin. Credential files, password fields, payment fields, security windows, and password-manager windows are blocked by dedicated file and UI tools.
 - Registry, permission, wallpaper, theme, audio, brightness, power-plan, and default-printer changes can be restored with `undo_list` and `undo_last`. The journal keeps seven days of entries and detects subsequent changes. Scripts, installs, file moves, and deletion have no automatic undo.
 - Browser tools independently launch installed Microsoft Edge or Google Chrome and connect through Playwright's Chrome DevTools Protocol support, with a separate visible profile under `%LOCALAPPDATA%\WindowsAxon\browser-profile`. They do not control the user's regular browser profile. Stop, a new conversation, and closing WindowsAxon disconnect automation while preserving browser windows and tabs. Later browser requests reconnect to the same profile. `browser_close` explicitly closes the selected tab. Sign-in, CAPTCHA, and protected input require the user.
+- `web_search` and `web_read` look up public pages in a separate hidden browser profile, `browser-profile/<channel>-research`. They do not show a window or change the visible WindowsAxon browser. The hidden browser stays open only for the current request, then closes when the request ends, when the user presses Stop, when a new conversation starts, or when WindowsAxon exits. A block, sign-in page, or CAPTCHA is returned to the model, which asks the user before opening that page in the visible browser. Remote endpoints require approval before search results or page text are sent.
 - `browser_read` returns the full visible page text, or the full visible text of a referenced element, to the model and audit log. It excludes HTML markup, scripts, styles, templates, comments, and hidden content while preserving text line breaks. It bypasses the usual 1,500-character observation limit so content after the navigation and page header remains available. Scrolling does not change the starting point of a full-page read.
 - `ui_screenshot` captures one window as a PNG, scaled to at most 1,280 pixels on the longer side, and sends it to the model as an image. The model must accept images; if the endpoint rejects a request containing an image, WindowsAxon resends it once without the image and tells the model to use `ui_snapshot` or `ui_read_text`. When that retry succeeds, images are no longer sent for the rest of the conversation, and a `kind: "model_fallback"`, `status: "no_images"` audit entry is written. Protected windows are blocked as with other desktop tools, minimized windows are refused, and a remote endpoint requires approval. Only the newest screenshot is sent with each model call; the audit log records the text description, not the image.
 - Paint tools create canvases, draw shapes and freehand paths, add text, and save images through Paint's interface. Drawing requires the entire canvas to be visible. The adapter currently uses English control names where stable automation IDs are unavailable; other versions or languages may return an unsupported-control error. Saved files are checked for existence and image format.

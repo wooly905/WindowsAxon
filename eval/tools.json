@@ -278,5 +278,64 @@
       ]
     },
     "output": "Exit code 0. ok"
+  },
+  {
+    "name": "browser_open",
+    "group": "browser",
+    "risk": "Read",
+    "description": "Open an http or https URL in the visible browser.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "newTab": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "output": "Opened https://www.cnn.com: CNN."
+  },
+  {
+    "name": "web_search",
+    "group": "web",
+    "risk": "Read",
+    "policyDriven": true,
+    "description": "Search the public web in a hidden browser. No window is shown.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "output": "1. HP ProBook CPU\nhttps://www.example.com/hp-cpu\nThe processor is soldered and cannot be upgraded."
+  },
+  {
+    "name": "web_read",
+    "group": "web",
+    "risk": "Read",
+    "policyDriven": true,
+    "description": "Read a public page in a hidden browser. No window is shown.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "output": "The processor is soldered and cannot be upgraded."
   }
 ]

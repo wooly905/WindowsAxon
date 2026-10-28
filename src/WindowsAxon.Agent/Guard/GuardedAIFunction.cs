@@ -108,7 +108,7 @@ public sealed class GuardedAIFunction(ToolEntry entry,
             var message = CardNumberMasker.Mask(error.Message);
             observation = "Error: " + (message.Length > MaxErrorChars ? message[..MaxErrorChars] : message);
         }
-        observation = success && entry.Name == "browser_read" ? observation : Cut(observation);
+        observation = success && entry.Name is "browser_read" or "web_read" ? observation : Cut(observation);
         var images = TranscriptWriter.Images(result);
         return images.Count > 0 ? new List<AIContent>([new TextContent(observation), .. images]) : observation;
     }

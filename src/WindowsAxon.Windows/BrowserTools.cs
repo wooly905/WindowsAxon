@@ -24,9 +24,7 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
         if (_context is null)
         {
             _playwright ??= await Playwright.CreateAsync();
-            using var choice = Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice");
-            var channel = choice?.GetValue("ProgId")?.ToString()?.StartsWith("Chrome",
-                                                                             StringComparison.OrdinalIgnoreCase) == true ? "chrome" : "msedge";
+            var channel = PreferredChannel();
             var context = await ConnectBrowserAsync(_playwright,
                                                      Path.Combine(dataFolder, "browser-profile", channel),
                                                      channel);
@@ -46,10 +44,24 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
         return _page;
     }
 
+    internal static string PreferredChannel()
+    {
+        using var choice = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice");
+        return choice?.GetValue("ProgId")?.ToString()?.StartsWith("Chrome", StringComparison.OrdinalIgnoreCase) == true
+            ? "chrome"
+            : "msedge";
+    }
+
+    /// <summary>
+    /// <paramref name="started"/> owns the process when set. A headless research browser uses it so the caller can
+    /// close that process without closing the visible browser. The visible browser leaves the handle and keeps running.
+    /// </summary>
     internal static async Task<IBrowserContext> ConnectBrowserAsync(IPlaywright playwright,
                                                                     string profile,
                                                                     string channel,
-                                                                    bool headless = false)
+                                                                    bool headless = false,
+                                                                    Action<Process>? started = null,
+                                                                    CancellationToken cancellationToken = default)
     {
         Directory.CreateDirectory(profile);
         var timer = Stopwatch.StartNew();
@@ -84,10 +96,12 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
 
             if (!launched)
             {
+                var ownProcess = started is not null;
                 var start = new ProcessStartInfo(BrowserExecutable(channel))
                 {
-                    UseShellExecute = true,
-                    WindowStyle = headless ? ProcessWindowStyle.Hidden : ProcessWindowStyle.Normal
+                    UseShellExecute = !ownProcess,
+                    WindowStyle = headless ? ProcessWindowStyle.Hidden : ProcessWindowStyle.Normal,
+                    CreateNoWindow = ownProcess
                 };
                 foreach (var argument in new[]
                 {
@@ -105,12 +119,21 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
                     start.ArgumentList.Add("--headless=new");
                 }
                 start.ArgumentList.Add("about:blank");
-                using var process = Process.Start(start)
+                var process = Process.Start(start)
                     ?? throw new InvalidOperationException("Could not start the browser.");
+                if (ownProcess)
+                {
+                    started!(process);
+                }
+                else
+                {
+                    process.Dispose();
+                }
                 launched = true;
             }
 
-            await Task.Delay(100);
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Delay(100, cancellationToken);
         }
 
         throw new InvalidOperationException("Could not connect to WindowsAxon's browser. Close an older WindowsAxon browser window and try again.",
@@ -292,6 +315,11 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
     {
         var page = await PageAsync();
         await CheckPageAsync(page);
+        return await ReadVisibleTextAsync(page, reference is null ? null : await Element(reference));
+    }
+
+    internal static async Task<string> ReadVisibleTextAsync(IPage page, IElementHandle? element = null)
+    {
         const string readText = """
             root => {
               const excluded = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'HEAD']);
@@ -314,8 +342,8 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
               return read(root).replace(/\n{3,}/g, '\n\n').trim();
             }
             """;
-        return reference is null ? await page.Locator("body").EvaluateAsync<string>(readText)
-            : await (await Element(reference)).EvaluateAsync<string>(readText);
+        return element is null ? await page.Locator("body").EvaluateAsync<string>(readText)
+            : await element.EvaluateAsync<string>(readText);
     }
 
     [WindowsTool("browser_click", "browser", RiskLevel.Danger, policyDriven: true)]

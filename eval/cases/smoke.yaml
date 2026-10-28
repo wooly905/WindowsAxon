@@ -66,3 +66,19 @@
     script_create: "{\"Id\":\"script-1\",\"Summary\":\"Read owner and access rules of C:\\\\Windows.old\",\"Packages\":[],\"Code\":\"Get-Acl -LiteralPath 'C:\\\\Windows.old' | Format-List Owner,AccessToString\",\"Executed\":false}"
     script_run: "Exit code 0. Owner: NT SERVICE\\TrustedInstaller. Access: Administrators Allow ReadAndExecute; SYSTEM Allow ReadAndExecute; Users Allow ReadAndExecute."
   expect_answer_contains: ["TrustedInstaller"]
+
+- id: web-001
+  request: "what is the best CPU this computer can be upgraded to?"
+  expect_tools_any: [web_search, web_read]
+  forbid_tools: [browser_open, app_launch]
+  mock:
+    web_search: "1. HP ProBook CPU\nhttps://www.example.com/hp-cpu\nThe processor is soldered and cannot be upgraded."
+    web_read: "The processor is soldered and cannot be upgraded."
+  expect_answer_contains: ["soldered"]
+
+- id: web-002
+  request: "open chrome and go to https://www.cnn.com"
+  expect_tools_all: [browser_open]
+  expect_args:
+    browser_open: { url: "https://www.cnn.com" }
+  forbid_tools: [web_search, web_read, app_launch]
