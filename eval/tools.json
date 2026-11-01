@@ -1,7 +1,8 @@
 [
   {
     "name": "app_find",
-    "group": "base",
+    "group": "apps",
+    "alwaysInclude": true,
     "risk": "Read",
     "description": "Search the installed apps by name. Returns up to 5 matches with id.",
     "parameters": {
@@ -19,7 +20,8 @@
   },
   {
     "name": "app_launch",
-    "group": "base",
+    "group": "apps",
+    "alwaysInclude": true,
     "risk": "Read",
     "policyDriven": true,
     "description": "Start an app by id from app_find, optionally with a file.",

@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
@@ -11,8 +10,9 @@ public sealed class FileTools(UndoJournal journal, string session) : IUndoRestor
 {
     public string Kind => "acl";
 
-    [WindowsTool("fs_list_dir", "files")]
-    [Description("List files and folders in a directory. sort: name, size, date. Maximum 200 entries.")]
+    [Tool("fs_list_dir",
+          "files",
+          "List files and folders in a directory. sort: name, size, date. Maximum 200 entries.")]
     public object List(string path, string sort = "name", int limit = 50)
     {
         var entries = new DirectoryInfo(Path.GetFullPath(path)).EnumerateFileSystemInfos();
@@ -33,8 +33,11 @@ public sealed class FileTools(UndoJournal journal, string session) : IUndoRestor
             .ToArray();
     }
 
-    [WindowsTool("fs_find_files", "files", timeoutSeconds: 60, artifact: true)]
-    [Description("Find files under root by filename pattern, minimum size, and optional modifiedAfter ISO timestamp. Skips symbolic links and inaccessible folders. Maximum 200 results.")]
+    [Tool("fs_find_files",
+          "files",
+          "Find files under root by filename pattern, minimum size, and optional modifiedAfter ISO timestamp. Skips symbolic links and inaccessible folders. Maximum 200 results.",
+          timeoutSeconds: 60,
+          artifact: true)]
     public object Find(string root,
                        string pattern = "*",
                        long minimumSize = 0,
@@ -94,8 +97,10 @@ public sealed class FileTools(UndoJournal journal, string session) : IUndoRestor
         return matches;
     }
 
-    [WindowsTool("fs_read_text", "files", policyDriven: true)]
-    [Description("Read a text file, at most 20 KB. Credential files and binary files are refused. A remote model requires approval to receive the content.")]
+    [Tool("fs_read_text",
+          "files",
+          "Read a text file, at most 20 KB. Credential files and binary files are refused. A remote model requires approval to receive the content.",
+          policyDriven: true)]
     public string Read(string path)
     {
         path = SafeReadPath(path);
@@ -177,16 +182,20 @@ public sealed class FileTools(UndoJournal journal, string session) : IUndoRestor
         return current;
     }
 
-    [WindowsTool("fs_copy", "files", RiskLevel.Change)]
-    [Description("Copy one file. Refuses overwriting an existing destination.")]
+    [Tool("fs_copy",
+          "files",
+          "Copy one file. Refuses overwriting an existing destination.",
+          RiskLevel.Change)]
     public string Copy(string source, string destination)
     {
         File.Copy(Path.GetFullPath(source), Path.GetFullPath(destination), false);
         return "Copied file.";
     }
 
-    [WindowsTool("fs_move", "files", RiskLevel.Change)]
-    [Description("Move one file or folder. Refuses overwriting an existing destination.")]
+    [Tool("fs_move",
+          "files",
+          "Move one file or folder. Refuses overwriting an existing destination.",
+          RiskLevel.Change)]
     public string Move(string source, string destination)
     {
         source = Path.GetFullPath(source);
@@ -203,16 +212,20 @@ public sealed class FileTools(UndoJournal journal, string session) : IUndoRestor
         return "Moved.";
     }
 
-    [WindowsTool("fs_create_dir", "files", RiskLevel.Change)]
-    [Description("Create a directory and missing parent directories.")]
+    [Tool("fs_create_dir",
+          "files",
+          "Create a directory and missing parent directories.",
+          RiskLevel.Change)]
     public string Create(string path)
     {
         Directory.CreateDirectory(Path.GetFullPath(path));
         return "Created directory.";
     }
 
-    [WindowsTool("fs_delete", "files", RiskLevel.Danger)]
-    [Description("Send one file or folder to the Windows Recycle Bin. Never permanently deletes. No automatic undo.")]
+    [Tool("fs_delete",
+          "files",
+          "Send one file or folder to the Windows Recycle Bin. Never permanently deletes. No automatic undo.",
+          RiskLevel.Danger)]
     public Task<string> Delete(string path)
     {
         return StaThread.Run(() =>
@@ -228,8 +241,9 @@ public sealed class FileTools(UndoJournal journal, string session) : IUndoRestor
         });
     }
 
-    [WindowsTool("acl_get", "files")]
-    [Description("Read a file or folder owner and access rules.")]
+    [Tool("acl_get",
+          "files",
+          "Read a file or folder owner and access rules.")]
     public string AclGet(string path)
     {
         var security = Security(path);
@@ -248,8 +262,10 @@ public sealed class FileTools(UndoJournal journal, string session) : IUndoRestor
         return sddl;
     }
 
-    [WindowsTool("acl_set", "files", RiskLevel.Danger)]
-    [Description("Grant or remove one explicit Allow rule. rights: Read, ReadAndExecute, Modify, FullControl. Blocks protected folders and other users' profiles. Preserves ownership and inheritance.")]
+    [Tool("acl_set",
+          "files",
+          "Grant or remove one explicit Allow rule. rights: Read, ReadAndExecute, Modify, FullControl. Blocks protected folders and other users' profiles. Preserves ownership and inheritance.",
+          RiskLevel.Danger)]
     public string AclSet(string path, string principal, string rights, bool inherit = false, bool remove = false)
     {
         path = WritableAclPath(path);

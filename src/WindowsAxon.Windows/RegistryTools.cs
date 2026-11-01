@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Text.Json;
 using WindowsAxon.Agent.Tools;
 using WindowsAxon.Agent.Undo;
@@ -12,12 +11,15 @@ public sealed class RegistryTools(UndoJournal journal, string session) : IUndoRe
 
     private sealed record ValueSnapshot(string Type, JsonElement Value);
 
-    [WindowsTool("registry_read", "registry")]
-    [Description("Read one registry value from HKCU or HKLM. Returns its type and unexpanded value.")]
+    [Tool("registry_read",
+          "registry",
+          "Read one registry value from HKCU or HKLM. Returns its type and unexpanded value.")]
     public string? Read(string path, string name = "") => ReadCurrent(Target(path, name));
 
-    [WindowsTool("registry_set_value", "registry", RiskLevel.Danger)]
-    [Description("Set one HKCU value. type: REG_SZ, REG_EXPAND_SZ, REG_DWORD, REG_QWORD, REG_MULTI_SZ. Policy keys are blocked. Undo supported.")]
+    [Tool("registry_set_value",
+          "registry",
+          "Set one HKCU value. type: REG_SZ, REG_EXPAND_SZ, REG_DWORD, REG_QWORD, REG_MULTI_SZ. Policy keys are blocked. Undo supported.",
+          RiskLevel.Danger)]
     public string Set(string path, string name, string type, JsonElement value)
     {
         var target = Target(path, name);
@@ -33,8 +35,10 @@ public sealed class RegistryTools(UndoJournal journal, string session) : IUndoRe
         return "Registry value updated. Undo is available.";
     }
 
-    [WindowsTool("registry_delete_value", "registry", RiskLevel.Danger)]
-    [Description("Delete one HKCU registry value. Never deletes a key tree. Policy keys are blocked. Undo supported.")]
+    [Tool("registry_delete_value",
+          "registry",
+          "Delete one HKCU registry value. Never deletes a key tree. Policy keys are blocked. Undo supported.",
+          RiskLevel.Danger)]
     public string Delete(string path, string name)
     {
         var target = Target(path, name);

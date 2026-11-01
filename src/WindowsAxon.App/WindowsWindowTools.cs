@@ -9,13 +9,6 @@ using WindowsAxon.Windows;
 
 namespace WindowsAxon.App;
 
-internal sealed record DesktopWindow(nint Handle,
-                                     int ProcessId,
-                                     long ProcessStartTime,
-                                     string ProcessName,
-                                     string Title);
-internal sealed record WindowInfo(string Id, string AppName, string Title);
-
 internal sealed class WindowsWindowTools : IApprovalRule
 {
     private readonly Func<IReadOnlyList<DesktopWindow>> _readWindows;
@@ -39,41 +32,39 @@ internal sealed class WindowsWindowTools : IApprovalRule
         _closeTimeout = closeTimeout;
     }
 
-    public void AddTo(ToolCatalog catalog)
-    {
-        catalog.Add(AIFunctionFactory.Create(List,
-                                             "ui_list_windows",
-                                             "Find visible top-level windows by application process name or title. Use name to filter, for example 'paint'. Returns up to 20 windows with IDs for ui_close_window. If several match, ask the user which window to close."),
-                    ToolCatalog.BaseGroup,
-                    RiskLevel.Read);
-        catalog.Add(AIFunctionFactory.Create(CloseAsync,
-                                             "ui_close_window",
-                                             "Request a normal close of one window using its ID from ui_list_windows. Requires approval. Preserves the application's save prompts. Reports success only after the window closes; never dismiss a save prompt automatically."),
-                    ToolCatalog.BaseGroup,
-                    RiskLevel.Change,
-                    policyDriven: true);
-    }
-
+    [Tool("ui_list_windows",
+          "desktop_ui",
+          "Find visible top-level windows by application process name or title. Use name to filter, for example 'paint'. Returns up to 20 windows with IDs for ui_close_window. If several match, ask the user which window to close.",
+          alwaysInclude: true)]
     internal IReadOnlyList<WindowInfo> List(string name = "")
     {
-        var filter = name.Trim();
+        string filter = name.Trim();
         _listed.Clear();
-        var result = new List<WindowInfo>();
-        foreach (var window in _readWindows().Where(window => window.ProcessId != Environment.ProcessId
+        List<WindowInfo> result = new List<WindowInfo>();
+
+        foreach (DesktopWindow? window in _readWindows().Where(window => window.ProcessId != Environment.ProcessId
             && (window.Title.Contains(filter, StringComparison.OrdinalIgnoreCase)
             || window.ProcessName.Contains(filter, StringComparison.OrdinalIgnoreCase))).Take(20))
         {
-            var id = Guid.NewGuid().ToString("N");
+            string id = Guid.NewGuid().ToString("N");
             _listed.Add(id, window);
             result.Add(new WindowInfo(id, window.ProcessName, window.Title));
         }
+
         return result;
     }
 
+    [Tool("ui_close_window",
+          "desktop_ui",
+          "Request a normal close of one window using its ID from ui_list_windows. Requires approval. Preserves the application's save prompts. Reports success only after the window closes; never dismiss a save prompt automatically.",
+          RiskLevel.Change,
+          policyDriven: true,
+          alwaysInclude: true)]
     internal async Task<string> CloseAsync(string windowId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!_listed.TryGetValue(windowId, out var window))
+
+        if (!_listed.TryGetValue(windowId, out DesktopWindow? window))
         {
             throw new ArgumentException("The window ID is not in the last window list. Use ui_list_windows first.");
         }
@@ -84,22 +75,25 @@ internal sealed class WindowsWindowTools : IApprovalRule
 
         UiSafety.CheckProcess(window.ProcessName);
         _requestClose(window);
-        var wait = Stopwatch.StartNew();
-        do
+        Stopwatch wait = Stopwatch.StartNew();
+
+        while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
             if (!_isOpen(window))
             {
                 _listed.Remove(windowId);
                 return $"Closed window: {window.Title} ({window.ProcessName}). The window's closure was verified.";
             }
+
             if (wait.Elapsed >= _closeTimeout)
             {
                 break;
             }
 
             await Task.Delay(100, cancellationToken);
-        } while (true);
+        }
 
         throw new InvalidOperationException("Close requested, but the window is still open. It may be waiting for a save prompt or may have refused to close. Ask the user to check the application. Do not report that it is closed.");
     }
@@ -119,10 +113,11 @@ internal sealed class WindowsWindowTools : IApprovalRule
 
     public ApprovalDecision Decide(FunctionCallContent call)
     {
-        var id = call.Arguments is { } arguments
+        string? id = call.Arguments is { } arguments
             && arguments.TryGetValue("windowId", out var value) ? value?.ToString() : null;
-        var target = id is not null && _listed.TryGetValue(id, out var window)
+        string target = id is not null && _listed.TryGetValue(id, out var window)
             ? $"Close '{window.Title}' ({window.ProcessName})?" : "Close the selected window?";
+
         return new ApprovalDecision(ApprovalOutcome.Ask,
                                     false,
                                     $"{target} Unsaved changes may require a response in the application.");
@@ -135,7 +130,8 @@ internal sealed class WindowsWindowTools : IApprovalRule
             throw new PlatformNotSupportedException("Window tools require Windows.");
         }
 
-        var windows = new List<DesktopWindow>();
+        List<DesktopWindow> windows = [];
+
         if (!EnumWindows((handle, _) =>
         {
             if (!IsWindowVisible(handle) || GetWindow(handle, 4) != nint.Zero)
@@ -143,7 +139,8 @@ internal sealed class WindowsWindowTools : IApprovalRule
                 return true;
             }
 
-            var window = ReadWindow(handle);
+            DesktopWindow? window = ReadWindow(handle);
+
             if (window is not null && !string.IsNullOrWhiteSpace(window.Title))
             {
                 windows.Add(window);
@@ -155,6 +152,7 @@ internal sealed class WindowsWindowTools : IApprovalRule
         {
             throw new Win32Exception(Marshal.GetLastWin32Error());
         }
+
         return windows;
     }
 
@@ -171,6 +169,7 @@ internal sealed class WindowsWindowTools : IApprovalRule
             using var process = Process.GetProcessById(checked((int)processId));
             var title = new StringBuilder(GetWindowTextLength(handle) + 1);
             GetWindowText(handle, title, title.Capacity);
+
             return new DesktopWindow(handle,
                                      process.Id,
                                      process.StartTime.ToUniversalTime().Ticks,

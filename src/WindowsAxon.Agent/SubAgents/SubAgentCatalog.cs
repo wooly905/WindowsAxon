@@ -1,26 +1,10 @@
-using WindowsAxon.Agent.Tools;
-
 namespace WindowsAxon.Agent.SubAgents;
 
-/// <summary>One sub-agent: the tools it owns and the rules added to its prompt.</summary>
-public sealed record SubAgentDefinition(string Name,
-                                        string Description,
-                                        IReadOnlyList<string> Groups,
-                                        IReadOnlyList<string> Rules,
-                                        IReadOnlyList<string>? ExtraTools = null,
-                                        IReadOnlyList<string>? ExcludedTools = null)
-{
-    public bool Includes(ToolEntry entry) =>
-        (Groups.Contains(entry.Group) && ExcludedTools?.Contains(entry.Name) != true)
-        || ExtraTools?.Contains(entry.Name) == true;
-}
-
-/// <summary>The sub-agents of ToolSelection = SubAgents. The main agent keeps the groups in MainGroups.</summary>
+/// <summary>The sub-agents of ToolSelection = SubAgents. The main agent keeps the groups in MainGroups and the AlwaysInclude tools.</summary>
 public static class SubAgentCatalog
 {
     public static readonly IReadOnlySet<string> MainGroups = new HashSet<string>
     {
-        ToolCatalog.BaseGroup,
         "utilities",
         "docs"
     };

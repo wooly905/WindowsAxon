@@ -61,8 +61,12 @@ public sealed class DocsTools : IApprovalRule, IAsyncDisposable
         return text;
     }
 
-    [WindowsTool("docs_search", ToolCatalog.BaseGroup, policyDriven: true, timeoutSeconds: 60)]
-    [Description("Search Microsoft Learn technical documentation through its official MCP server. The query is sent to Microsoft.")]
+    [Tool("docs_search",
+          "docs",
+          "Search Microsoft Learn technical documentation through its official MCP server. The query is sent to Microsoft.",
+          policyDriven: true,
+          timeoutSeconds: 60,
+          alwaysInclude: true)]
     public Task<string> Search(string query, CancellationToken cancellationToken) => Call("microsoft_docs_search",
                                                                                           new()
                                                                                           {
@@ -70,8 +74,11 @@ public sealed class DocsTools : IApprovalRule, IAsyncDisposable
                                                                                           },
                                                                                           cancellationToken);
 
-    [WindowsTool("docs_fetch", "docs", policyDriven: true, timeoutSeconds: 60)]
-    [Description("Fetch a Microsoft Learn article through its official MCP server. Requires an https learn.microsoft.com URL.")]
+    [Tool("docs_fetch",
+          "docs",
+          "Fetch a Microsoft Learn article through its official MCP server. Requires an https learn.microsoft.com URL.",
+          policyDriven: true,
+          timeoutSeconds: 60)]
     public Task<string> Fetch(string url, CancellationToken cancellationToken)
     {
         var uri = BrowserTools.WebUrl(url);
@@ -88,8 +95,11 @@ public sealed class DocsTools : IApprovalRule, IAsyncDisposable
                     cancellationToken);
     }
 
-    [WindowsTool("docs_code_search", "docs", policyDriven: true, timeoutSeconds: 60)]
-    [Description("Search official Microsoft code samples through its official MCP server. The query and optional language are sent to Microsoft.")]
+    [Tool("docs_code_search",
+          "docs",
+          "Search official Microsoft code samples through its official MCP server. The query and optional language are sent to Microsoft.",
+          policyDriven: true,
+          timeoutSeconds: 60)]
     public Task<string> SearchCode(string query,
                                    [Description("Optional. One of: csharp, javascript, typescript, python, powershell, azurecli, al, sql, java, kusto, cpp, go, rust, ruby, php. Omit to search every language.")] string? language = null,
                                    CancellationToken cancellationToken = default) =>

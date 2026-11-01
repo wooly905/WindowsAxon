@@ -26,8 +26,9 @@ public sealed class SystemTools
         }).ToArray();
     }
 
-    [WindowsTool("system_get_info", "system")]
-    [Description("Read computer name, domain or workgroup, signed-in user, Windows version, CPU, RAM, uptime, and computer model.")]
+    [Tool("system_get_info",
+          "system",
+          "Read computer name, domain or workgroup, signed-in user, Windows version, CPU, RAM, uptime, and computer model.")]
     public object Info() => new
     {
         OS = Query("SELECT Caption,Version,LastBootUpTime,TotalVisibleMemorySize FROM Win32_OperatingSystem"),
@@ -35,8 +36,9 @@ public sealed class SystemTools
         Computer = Query("SELECT Name,Domain,PartOfDomain,Workgroup,UserName,Manufacturer,Model FROM Win32_ComputerSystem")
     };
 
-    [WindowsTool("system_get_performance", "system")]
-    [Description("Read current CPU and memory usage and top five processes by CPU and working memory.")]
+    [Tool("system_get_performance",
+          "system",
+          "Read current CPU and memory usage and top five processes by CPU and working memory.")]
     public object Performance()
     {
         var processes = Query("SELECT Name,IDProcess,PercentProcessorTime,WorkingSet FROM Win32_PerfFormattedData_PerfProc_Process WHERE IDProcess<>0")
@@ -52,8 +54,9 @@ public sealed class SystemTools
         };
     }
 
-    [WindowsTool("disk_get_usage", "system")]
-    [Description("Read total, used, and free space on ready drives.")]
+    [Tool("disk_get_usage",
+          "system",
+          "Read total, used, and free space on ready drives.")]
     public object Disks() => DriveInfo.GetDrives().Where(drive => drive.IsReady).Select(drive => new
     {
         drive.Name,
@@ -63,16 +66,19 @@ public sealed class SystemTools
     })
         .ToArray();
 
-    [WindowsTool("process_list", "system")]
-    [Description("List processes, optionally filtering by name. Maximum 50 results.")]
+    [Tool("process_list",
+          "system",
+          "List processes, optionally filtering by name. Maximum 50 results.")]
     public object Processes(string name = "") => Query("SELECT ProcessId,Name,WorkingSetSize FROM Win32_Process")
         .Cast<Dictionary<string, object>>().Where(p => p["Name"].ToString()!.Contains(name,
                                                                                       StringComparison.OrdinalIgnoreCase))
         .Take(50)
         .ToArray();
 
-    [WindowsTool("process_stop", "system", RiskLevel.Danger)]
-    [Description("Stop a process owned by the current Windows user. Never stops WindowsAxon, Windows security, or a protected process. No undo.")]
+    [Tool("process_stop",
+          "system",
+          "Stop a process owned by the current Windows user. Never stops WindowsAxon, Windows security, or a protected process. No undo.",
+          RiskLevel.Danger)]
     public string Stop(int processId)
     {
         using var process = Process.GetProcessById(processId);
@@ -108,8 +114,9 @@ public sealed class SystemTools
         return "Process exit verified.";
     }
 
-    [WindowsTool("service_list", "system")]
-    [Description("Read service names, states, and start modes. Maximum 50 matching services.")]
+    [Tool("service_list",
+          "system",
+          "Read service names, states, and start modes. Maximum 50 matching services.")]
     public object Services(string name = "") => Query("SELECT Name,DisplayName,State,StartMode FROM Win32_Service")
         .Cast<Dictionary<string, object>>()
         .Where(p => p["Name"].ToString()!.Contains(name, StringComparison.OrdinalIgnoreCase)
@@ -118,8 +125,9 @@ public sealed class SystemTools
         .Take(50)
         .ToArray();
 
-    [WindowsTool("net_get_config", "network")]
-    [Description("Read active network adapters, addresses, gateways, and DNS servers.")]
+    [Tool("net_get_config",
+          "network",
+          "Read active network adapters, addresses, gateways, and DNS servers.")]
     public object Network() => NetworkInterface.GetAllNetworkInterfaces()
         .Where(adapter => adapter.OperationalStatus == OperationalStatus.Up)
         .Select(adapter =>
@@ -132,8 +140,9 @@ public sealed class SystemTools
         })
         .ToArray();
 
-    [WindowsTool("net_ping", "network")]
-    [Description("Ping one hostname or IP address, with a three-second timeout.")]
+    [Tool("net_ping",
+          "network",
+          "Ping one hostname or IP address, with a three-second timeout.")]
     public async Task<object> Ping(string host, CancellationToken cancellationToken)
     {
         using var ping = new System.Net.NetworkInformation.Ping();
@@ -146,16 +155,18 @@ public sealed class SystemTools
         };
     }
 
-    [WindowsTool("net_dns_lookup", "network")]
-    [Description("Resolve a hostname to IP addresses.")]
+    [Tool("net_dns_lookup",
+          "network",
+          "Resolve a hostname to IP addresses.")]
     public async Task<object> DnsLookup(string name, CancellationToken cancellationToken)
     {
         var addresses = await Dns.GetHostAddressesAsync(name, cancellationToken);
         return addresses.Select(address => address.ToString()).ToArray();
     }
 
-    [WindowsTool("net_test_port", "network")]
-    [Description("Test whether a TCP port is reachable, with a five-second timeout.")]
+    [Tool("net_test_port",
+          "network",
+          "Test whether a TCP port is reachable, with a five-second timeout.")]
     public async Task<string> Port(string host, int port, CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -165,8 +176,9 @@ public sealed class SystemTools
         return $"TCP connection succeeded: {host}:{port}.";
     }
 
-    [WindowsTool("eventlog_list_logs", "eventlog")]
-    [Description("List Windows event log names and record counts. Inaccessible logs report an unavailable count.")]
+    [Tool("eventlog_list_logs",
+          "eventlog",
+          "List Windows event log names and record counts. Inaccessible logs report an unavailable count.")]
     public object Logs(CancellationToken cancellationToken = default)
     {
         using var session = new EventLogSession();
@@ -190,8 +202,9 @@ public sealed class SystemTools
         }).ToArray();
     }
 
-    [WindowsTool("eventlog_query", "eventlog")]
-    [Description("Read up to 50 events, optionally filtered by numeric level, source, or after ISO timestamp. Security log may require administrator rights.")]
+    [Tool("eventlog_query",
+          "eventlog",
+          "Read up to 50 events, optionally filtered by numeric level, source, or after ISO timestamp. Security log may require administrator rights.")]
     public object Events(string logName = "Application",
                          int? level = null,
                          string? source = null,
@@ -255,18 +268,22 @@ public sealed class SystemTools
         return events;
     }
 
-    [WindowsTool("printer_list", "printers")]
-    [Description("Read installed printer names, statuses, default printer, ports, and drivers.")]
+    [Tool("printer_list",
+          "printers",
+          "Read installed printer names, statuses, default printer, ports, and drivers.")]
     public object Printers() => Query("SELECT Name,PrinterStatus,Default,PortName,DriverName FROM Win32_Printer");
 
-    [WindowsTool("print_queue_list", "printers")]
-    [Description("List print jobs for a printer.")]
+    [Tool("print_queue_list",
+          "printers",
+          "List print jobs for a printer.")]
     public object Jobs(string printer) => Query("SELECT Name,JobId,Owner,Document,Status FROM Win32_PrintJob")
         .Cast<Dictionary<string, object>>()
         .Where(job => job["Name"].ToString()!.StartsWith(printer + ",", StringComparison.OrdinalIgnoreCase)).ToArray();
 
-    [WindowsTool("print_job_cancel", "printers", RiskLevel.Change)]
-    [Description("Cancel one print job, or all jobs owned by the current user on the named printer. Other users' jobs are refused.")]
+    [Tool("print_job_cancel",
+          "printers",
+          "Cancel one print job, or all jobs owned by the current user on the named printer. Other users' jobs are refused.",
+          RiskLevel.Change)]
     public string CancelJob(string printer, int? jobId = null)
     {
         using var search = new ManagementObjectSearcher("SELECT * FROM Win32_PrintJob");
@@ -300,8 +317,10 @@ public sealed class SystemTools
         return $"Cancelled {count} jobs.";
     }
 
-    [WindowsTool("printer_print_test_page", "printers", RiskLevel.Change)]
-    [Description("Ask Windows to print one test page on the named installed printer.")]
+    [Tool("printer_print_test_page",
+          "printers",
+          "Ask Windows to print one test page on the named installed printer.",
+          RiskLevel.Change)]
     public string TestPage(string printer)
     {
         using var search = new ManagementObjectSearcher("SELECT * FROM Win32_Printer");

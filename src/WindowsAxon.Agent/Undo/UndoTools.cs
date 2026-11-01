@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Text;
 using WindowsAxon.Agent.Tools;
-using Microsoft.Extensions.AI;
 
 namespace WindowsAxon.Agent.Undo;
 
@@ -10,22 +9,20 @@ public sealed class UndoTools(UndoJournal journal, IEnumerable<IUndoRestorer> re
 {
     private readonly Dictionary<string, IUndoRestorer> _restorers = restorers.ToDictionary(r => r.Kind);
 
-    public void Register(ToolCatalog catalog)
-    {
-        catalog.Add(AIFunctionFactory.Create(UndoList, "undo_list"), "utilities", RiskLevel.Read);
-        catalog.Add(AIFunctionFactory.Create(UndoLast, "undo_last"), "utilities", RiskLevel.Change);
-    }
-
-    [Description("List the changes that WindowsAxon made in the last 7 days, newest first.")]
+    [Tool("undo_list",
+          "utilities",
+          "List the changes that WindowsAxon made in the last 7 days, newest first.")]
     public string UndoList()
     {
-        var entries = journal.List();
+        IReadOnlyList<UndoEntry> entries = journal.List();
+
         if (entries.Count == 0)
         {
             return "WindowsAxon made no changes in the last 7 days.";
         }
 
-        var text = new StringBuilder();
+        StringBuilder text = new StringBuilder();
+
         foreach (var entry in entries)
         {
             var superseded = journal.IsNewest(entry) ? "" : " (superseded)";
@@ -35,13 +32,17 @@ public sealed class UndoTools(UndoJournal journal, IEnumerable<IUndoRestorer> re
         return text.ToString();
     }
 
-    [Description("Undo one change that WindowsAxon made. Without id, undo the newest change that can be undone.")]
+    [Tool("undo_last",
+          "utilities",
+          "Undo one change that WindowsAxon made. Without id, undo the newest change that can be undone.",
+          RiskLevel.Change)]
     public string UndoLast([Description("ID from undo_list. Optional.")] string? id = null,
                            [Description("Restore even if the setting was changed after WindowsAxon changed it.")] bool force = false)
     {
-        var entry = id is null
+        UndoEntry? entry = id is null
             ? journal.List().FirstOrDefault(e => _restorers.ContainsKey(e.Kind) && journal.IsNewest(e))
             : journal.Find(id);
+
         if (entry is null)
         {
             return id is null ? "There is no change to undo." : $"No change with ID {id} in the last 7 days.";
@@ -57,7 +58,8 @@ public sealed class UndoTools(UndoJournal journal, IEnumerable<IUndoRestorer> re
             return $"WindowsAxon cannot undo {entry.Tool}.";
         }
 
-        var current = restorer.ReadCurrent(entry.Target);
+        string? current = restorer.ReadCurrent(entry.Target);
+
         if (!force && current != entry.NewValue)
         {
             return $"This setting was changed after WindowsAxon changed it. Current: {current}. To restore {entry.PreviousValue} anyway, call undo_last with force=true.";
@@ -65,6 +67,7 @@ public sealed class UndoTools(UndoJournal journal, IEnumerable<IUndoRestorer> re
 
         restorer.Restore(entry.Target, entry.PreviousValue); // if this throws, the journal is unchanged
         journal.Record(session, entry.Kind, "undo_last", entry.Target, current, entry.PreviousValue);
+
         return $"Restored {entry.Target} to {entry.PreviousValue}.";
     }
 }

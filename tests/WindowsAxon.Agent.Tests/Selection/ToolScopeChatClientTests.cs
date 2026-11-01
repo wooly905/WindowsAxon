@@ -36,13 +36,13 @@ public class ToolScopeChatClientTests
         public Harness(bool scopeTools = true, int maxActiveTools = 14)
         {
             foreach (var (name, group) in new[] {
-                ("app_find", ToolCatalog.BaseGroup),
+                ("app_find", "apps"),
                 ("net_ping", "network"),
                 ("net_dns_lookup", "network"),
                 ("fs_list_dir", "files")
             })
             {
-                Catalog.Add(AIFunctionFactory.Create(() => "", name), group, RiskLevel.Read);
+                Catalog.Add(AIFunctionFactory.Create(() => "", name), group, RiskLevel.Read, alwaysInclude: name == "app_find");
             }
 
             State = new ToolSelectionState(Catalog, maxActiveTools);

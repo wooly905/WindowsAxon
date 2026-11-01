@@ -13,7 +13,7 @@ public class ToolCatalogTests
         catalog.Add(Fn("net_ping"), "network", RiskLevel.Read);
         catalog.Add(Fn("wallpaper_set"), "personalize", RiskLevel.Change);
         catalog.Add(Fn("fs_delete"), "files", RiskLevel.Danger);
-        catalog.Add(Fn("app_launch"), ToolCatalog.BaseGroup, RiskLevel.Read, policyDriven: true);
+        catalog.Add(Fn("app_launch"), "apps", RiskLevel.Read, policyDriven: true, alwaysInclude: true);
 
         var tools = catalog.BuildAgentTools(e => e.Function);
 
@@ -27,14 +27,17 @@ public class ToolCatalogTests
     public void Groups_and_base_tools_are_reported()
     {
         var catalog = new ToolCatalog();
-        catalog.Add(Fn("app_find"), ToolCatalog.BaseGroup, RiskLevel.Read);
+        catalog.Add(Fn("app_find"), "apps", RiskLevel.Read, alwaysInclude: true);
+        catalog.Add(Fn("app_list"), "apps", RiskLevel.Read);
         catalog.Add(Fn("net_ping"), "network", RiskLevel.Read);
         catalog.Add(Fn("net_dns_lookup"), "network", RiskLevel.Read);
 
-        Assert.Equal(["network"], catalog.Groups);
+        Assert.Equal(["apps", "network"], catalog.Groups);
+        Assert.Equal(["app_find", "app_list"], catalog.ToolsInGroup("apps"));
         Assert.Equal(["net_ping", "net_dns_lookup"], catalog.ToolsInGroup("network"));
         Assert.True(catalog.IsBaseTool("app_find"));
         Assert.True(catalog.IsBaseTool("load_skill"));
+        Assert.False(catalog.IsBaseTool("app_list"));
         Assert.False(catalog.IsBaseTool("net_ping"));
         Assert.Equal(TimeSpan.FromSeconds(30), catalog.Find("net_ping")!.Timeout);
     }

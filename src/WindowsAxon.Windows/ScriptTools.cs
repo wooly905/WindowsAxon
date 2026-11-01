@@ -34,8 +34,11 @@ public sealed class ScriptTools(IChatClient model, string dataFolder, string ses
         }
     }
 
-    [WindowsTool("script_create", "scripts", timeoutSeconds: 120, artifact: true)]
-    [Description("Generate a PowerShell or Python script for a task that other tools cannot perform. Checks syntax and saves it for review; does not execute it. Returns its ID, summary, packages, and code.")]
+    [Tool("script_create",
+          "scripts",
+          "Generate a PowerShell or Python script for a task that other tools cannot perform. Checks syntax and saves it for review; does not execute it. Returns its ID, summary, packages, and code.",
+          timeoutSeconds: 120,
+          artifact: true)]
     public async Task<object> Create(string language, string task, CancellationToken cancellationToken)
     {
         if (language is not ("powershell" or "python"))
@@ -132,8 +135,12 @@ new ChatMessage(ChatRole.System,
         return script;
     }
 
-    [WindowsTool("script_run", "scripts", RiskLevel.Danger, policyDriven: true, timeoutSeconds: 120)]
-    [Description("Execute a previously created script after approval of its full code. Refuses modified scripts. Runs in its workspace with a 120-second timeout. Successful completion preserves child processes; Stop, timeout, or failure terminates the job. Exit code 0 confirms only script completion, not an open application window. Use dedicated launch tools for applications and management consoles. No automatic undo.")]
+    [Tool("script_run",
+          "scripts",
+          "Execute a previously created script after approval of its full code. Refuses modified scripts. Runs in its workspace with a 120-second timeout. Successful completion preserves child processes; Stop, timeout, or failure terminates the job. Exit code 0 confirms only script completion, not an open application window. Use dedicated launch tools for applications and management consoles. No automatic undo.",
+          RiskLevel.Danger,
+          policyDriven: true,
+          timeoutSeconds: 120)]
     public async Task<string> Run(string id, CancellationToken cancellationToken)
     {
         var script = Get(id);
@@ -184,8 +191,12 @@ new ChatMessage(ChatRole.System,
             + "an application window was not verified. Verify the window before reporting an application as open.";
     }
 
-    [WindowsTool("python_ensure", "scripts", RiskLevel.Danger, policyDriven: true, timeoutSeconds: 300)]
-    [Description("Find Python and create WindowsAxon's isolated virtual environment. If missing, installs Python.Python.3.14 via winget for the current user after approval. Accepts package/source licenses. Does not request elevation.")]
+    [Tool("python_ensure",
+          "scripts",
+          "Find Python and create WindowsAxon's isolated virtual environment. If missing, installs Python.Python.3.14 via winget for the current user after approval. Accepts package/source licenses. Does not request elevation.",
+          RiskLevel.Danger,
+          policyDriven: true,
+          timeoutSeconds: 300)]
     public async Task<string> EnsurePython(CancellationToken cancellationToken)
     {
         if (File.Exists(Python))
@@ -238,8 +249,12 @@ new ChatMessage(ChatRole.System,
         return await WindowsCommand.RunAsync(Python, ["-I", "--version"], cancellationToken);
     }
 
-    [WindowsTool("python_install_package", "scripts", RiskLevel.Danger, policyDriven: true, timeoutSeconds: 300)]
-    [Description("Install one named Python package in WindowsAxon's virtual environment after approval. No arbitrary pip options, URLs, paths, or alternative indexes.")]
+    [Tool("python_install_package",
+          "scripts",
+          "Install one named Python package in WindowsAxon's virtual environment after approval. No arbitrary pip options, URLs, paths, or alternative indexes.",
+          RiskLevel.Danger,
+          policyDriven: true,
+          timeoutSeconds: 300)]
     public Task<string> InstallPackage(string name, CancellationToken cancellationToken)
     {
         if (!Regex.IsMatch(name, @"^[A-Za-z0-9][A-Za-z0-9._-]{0,100}(==[A-Za-z0-9][A-Za-z0-9._-]{0,50})?$"))

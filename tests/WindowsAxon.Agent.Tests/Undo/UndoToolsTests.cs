@@ -94,7 +94,7 @@ public class UndoToolsTests
     public void Register_adds_undo_list_as_read_and_undo_last_as_change()
     {
         var catalog = new ToolCatalog();
-        new UndoTools(new UndoJournal(Path.GetTempPath(), TimeProvider.System), [], "s1").Register(catalog);
+        ToolRegistration.Add(catalog, new UndoTools(new UndoJournal(Path.GetTempPath(), TimeProvider.System), [], "s1"));
 
         Assert.Equal(RiskLevel.Read, catalog.Find("undo_list")!.Risk);
         Assert.Equal(RiskLevel.Change, catalog.Find("undo_last")!.Risk);

@@ -1,10 +1,9 @@
-using System.ComponentModel;
 using System.Diagnostics;
-using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Documents;
+using Microsoft.Extensions.AI;
 using WindowsAxon.Agent.Approval;
 using WindowsAxon.Agent.Tools;
-using Microsoft.Extensions.AI;
 
 namespace WindowsAxon.Windows;
 
@@ -20,8 +19,9 @@ public sealed class DesktopUiTools(Func<string, nint> resolveWindow, Action emer
         return root;
     }
 
-    [WindowsTool("ui_focus_window", "desktop_ui")]
-    [Description("Bring a window ID from ui_list_windows to the front. Blocks security, credential, remote-desktop, password-manager, and WindowsAxon windows.")]
+    [Tool("ui_focus_window",
+          "desktop_ui",
+          "Bring a window ID from ui_list_windows to the front. Blocks security, credential, remote-desktop, password-manager, and WindowsAxon windows.")]
     public Task<string> Focus(string windowId)
     {
         return StaThread.Run(() =>
@@ -30,6 +30,7 @@ public sealed class DesktopUiTools(Func<string, nint> resolveWindow, Action emer
             var handle = resolveWindow(windowId);
             DesktopInput.ShowWindow(handle, 9);
             DesktopInput.SetForegroundWindow(handle);
+
             if (DesktopInput.GetForegroundWindow() != handle)
             {
                 root.SetFocus();
@@ -44,16 +45,19 @@ public sealed class DesktopUiTools(Func<string, nint> resolveWindow, Action emer
         });
     }
 
-    [WindowsTool("ui_snapshot", "desktop_ui", policyDriven: true)]
-    [Description("Read up to 50 visible interactive controls of a listed window, with fresh refs, control types, names and automation IDs. Does not read password values. Remote endpoints require approval to receive content.")]
+    [Tool("ui_snapshot",
+          "desktop_ui",
+          "Read up to 50 visible interactive controls of a listed window, with fresh refs, control types, names and automation IDs. Does not read password values. Remote endpoints require approval to receive content.",
+          policyDriven: true)]
     public Task<object> Snapshot(string windowId)
     {
         return StaThread.Run<object>(() =>
         {
             _refs.Clear();
-            var root = Root(windowId);
-            var all = root.FindAll(TreeScope.Descendants, System.Windows.Automation.Condition.TrueCondition);
-            var result = new List<object>();
+            AutomationElement root = Root(windowId);
+            AutomationElementCollection all = root.FindAll(TreeScope.Descendants, System.Windows.Automation.Condition.TrueCondition);
+            List<object> result = [];
+
             foreach (AutomationElement element in all)
             {
                 if (element.Current.IsOffscreen || element.Current.ControlType == ControlType.Text
@@ -62,16 +66,17 @@ public sealed class DesktopUiTools(Func<string, nint> resolveWindow, Action emer
                     continue;
                 }
 
-                var id = Guid.NewGuid().ToString("N")[..8];
+                string id = Guid.NewGuid().ToString("N")[..8];
                 _refs.Add(id, (windowId, element));
                 result.Add(new
                 {
                     Ref = id,
                     Type = element.Current.ControlType.ProgrammaticName,
-                    element.Current.Name,
-                    element.Current.AutomationId,
-                    element.Current.IsPassword
+                    Name = element.Current.Name,
+                    AutomationId = element.Current.AutomationId,
+                    IsPassword = element.Current.IsPassword
                 });
+
                 if (result.Count == 50)
                 {
                     break;
@@ -101,8 +106,11 @@ public sealed class DesktopUiTools(Func<string, nint> resolveWindow, Action emer
         return target;
     }
 
-    [WindowsTool("ui_click", "desktop_ui", RiskLevel.Danger, policyDriven: true)]
-    [Description("Invoke, toggle, select, or click a ref from the last ui_snapshot. Every call requires approval, including send, buy, delete, and submit.")]
+    [Tool("ui_click",
+          "desktop_ui",
+          "Invoke, toggle, select, or click a ref from the last ui_snapshot. Every call requires approval, including send, buy, delete, and submit.",
+          RiskLevel.Danger,
+          policyDriven: true)]
     public Task<string> Click(string reference, CancellationToken cancellationToken)
     {
         return StaThread.Run(() =>
@@ -137,8 +145,11 @@ public sealed class DesktopUiTools(Func<string, nint> resolveWindow, Action emer
         });
     }
 
-    [WindowsTool("ui_type", "desktop_ui", RiskLevel.Change, policyDriven: true)]
-    [Description("Replace text in an editable control by ref. Refuses password, verification-code and payment controls. Uses ValuePattern where available.")]
+    [Tool("ui_type",
+          "desktop_ui",
+          "Replace text in an editable control by ref. Refuses password, verification-code and payment controls. Uses ValuePattern where available.",
+          RiskLevel.Change,
+          policyDriven: true)]
     public Task<string> Type(string reference, string text, CancellationToken cancellationToken)
     {
         return StaThread.Run(() =>
@@ -179,8 +190,11 @@ public sealed class DesktopUiTools(Func<string, nint> resolveWindow, Action emer
         });
     }
 
-    [WindowsTool("ui_press_keys", "desktop_ui", RiskLevel.Change, policyDriven: true)]
-    [Description("Send one key or shortcut to a specified window ID. Refuses protected focused fields. Foreground is checked throughout; Ctrl+Alt+Q stops input.")]
+    [Tool("ui_press_keys",
+          "desktop_ui",
+          "Send one key or shortcut to a specified window ID. Refuses protected focused fields. Foreground is checked throughout; Ctrl+Alt+Q stops input.",
+          RiskLevel.Change,
+          policyDriven: true)]
     public Task<string> Press(string windowId, string keys, CancellationToken cancellationToken)
     {
         return StaThread.Run(() =>
@@ -201,8 +215,11 @@ public sealed class DesktopUiTools(Func<string, nint> resolveWindow, Action emer
         });
     }
 
-    [WindowsTool("ui_drag", "desktop_ui", RiskLevel.Change, policyDriven: true)]
-    [Description("Drag inside an element by ref. Coordinates are relative to its bounds, from 0 to 1000. Ctrl+Alt+Q stops input.")]
+    [Tool("ui_drag",
+          "desktop_ui",
+          "Drag inside an element by ref. Coordinates are relative to its bounds, from 0 to 1000. Ctrl+Alt+Q stops input.",
+          RiskLevel.Change,
+          policyDriven: true)]
     public Task<string> Drag(string reference,
                              double startX,
                              double startY,
@@ -225,8 +242,10 @@ public sealed class DesktopUiTools(Func<string, nint> resolveWindow, Action emer
         });
     }
 
-    [WindowsTool("ui_read_text", "desktop_ui", policyDriven: true)]
-    [Description("Read at most 1500 characters of a window or a snapshot ref. Refuses password fields. Remote endpoints require approval.")]
+    [Tool("ui_read_text",
+          "desktop_ui",
+          "Read at most 1500 characters of a window or a snapshot ref. Refuses password fields. Remote endpoints require approval.",
+          policyDriven: true)]
     public Task<string> Read(string windowId, string? reference = null)
     {
         return StaThread.Run(() =>

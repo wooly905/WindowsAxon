@@ -1,27 +1,16 @@
 using System.Text.Json;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using WindowsAxon.Agent.Approval;
 using WindowsAxon.Agent.Audit;
 using WindowsAxon.Agent.Guard;
 using WindowsAxon.Agent.Selection;
 using WindowsAxon.Agent.Settings;
-using WindowsAxon.Agent.Skills;
 using WindowsAxon.Agent.Steps;
 using WindowsAxon.Agent.SubAgents;
 using WindowsAxon.Agent.Tools;
-using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
 
 namespace WindowsAxon.Agent;
-
-public sealed record AgentDependencies(ChatSettings Chat,
-                                       IChatClient Model,
-                                       ToolCatalog Catalog,
-                                       SkillCatalog Skills,
-                                       IReadOnlyList<string> SkillRoots,
-                                       IAuditLog Audit,
-                                       IReadOnlyList<IApprovalRule> ApprovalRules,
-                                       IStepLimitPrompter StepLimitPrompter,
-                                       bool DocsAvailable);
 
 public sealed class AgentFactory(AgentDependencies dependencies)
 {
@@ -48,7 +37,7 @@ public sealed class AgentFactory(AgentDependencies dependencies)
             : Prompts.System(d.DocsAvailable, StepMode.Structured);
 
         var tools = d.Catalog.BuildAgentTools(entry => new GuardedAIFunction(entry, selection, calls, ledger, d.Audit),
-                                              entry => !subAgents || SubAgentCatalog.MainGroups.Contains(entry.Group))
+                                              entry => !subAgents || entry.AlwaysInclude || SubAgentCatalog.MainGroups.Contains(entry.Group))
             .ToList();
 
         if (groups)
@@ -107,8 +96,7 @@ public sealed class AgentFactory(AgentDependencies dependencies)
         };
     }
 
-    private float? Temperature =>
-        string.Equals(dependencies.Chat.Model, "auto", StringComparison.OrdinalIgnoreCase) ? null : 0.1f;
+    private float? Temperature => string.Equals(dependencies.Chat.Model, "auto", StringComparison.OrdinalIgnoreCase) ? null : 0.1f;
 
     /// <summary>The model pipeline shared by the main agent and the sub-agents.</summary>
     private IChatClient BuildChatClient(ToolSelectionState selection,
@@ -130,6 +118,7 @@ public sealed class AgentFactory(AgentDependencies dependencies)
                     : ToolCallAudit.InvokeAsync(context, d.Audit, ledger, token);
             })
             .Use(inner => new ToolScopeChatClient(inner, selection, d.Skills, d.StepLimitPrompter, scopeTools));
+
         if (d.Chat.StepMode == StepMode.Structured)
         {
             builder.Use(inner => new ReActStepChatClient(inner,
@@ -149,6 +138,7 @@ public sealed class AgentFactory(AgentDependencies dependencies)
         }
 
         builder.Use(inner => new ImageFallbackChatClient(inner, error => LogImageFallback(d.Audit, ledger, error)));
+
         return builder.Build();
     }
 

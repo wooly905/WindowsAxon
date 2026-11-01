@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Globalization;
 using System.Windows;
 using System.Runtime.InteropServices;
@@ -53,12 +52,16 @@ public sealed class UtilityTools : IApprovalRule
                                                                     false,
                                                                     "Clipboard text may contain sensitive information and will be sent to the configured model.");
 
-    [WindowsTool("clipboard_get", "utilities", RiskLevel.Change)]
-    [Description("Read clipboard text. Always requires approval because the clipboard may contain sensitive information.")]
+    [Tool("clipboard_get",
+          "utilities",
+          "Read clipboard text. Always requires approval because the clipboard may contain sensitive information.",
+          RiskLevel.Change)]
     public Task<string> ClipboardGet() => StaThread.Run(() => Clipboard.ContainsText() ? Clipboard.GetText() : "No text on the clipboard.");
 
-    [WindowsTool("clipboard_set", "utilities", RiskLevel.Change)]
-    [Description("Replace clipboard text with the supplied text.")]
+    [Tool("clipboard_set",
+          "utilities",
+          "Replace clipboard text with the supplied text.",
+          RiskLevel.Change)]
     public Task<string> ClipboardSet(string text)
     {
         return StaThread.Run(() =>
@@ -68,8 +71,9 @@ public sealed class UtilityTools : IApprovalRule
         });
     }
 
-    [WindowsTool("calc_evaluate", "utilities")]
-    [Description("Evaluate arithmetic with +, -, *, /, %, ^ and parentheses. No code execution. Uses invariant decimal notation.")]
+    [Tool("calc_evaluate",
+          "utilities",
+          "Evaluate arithmetic with +, -, *, /, %, ^ and parentheses. No code execution. Uses invariant decimal notation.")]
     public double Calculate(string expression) => Arithmetic.Evaluate(expression);
 }
 

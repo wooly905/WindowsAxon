@@ -11,7 +11,7 @@ namespace WindowsAxon.Windows;
 /// Public web lookup in a hidden browser. The visible browser and its profile are left alone.
 /// The hidden browser closes when the request ends, on Stop, on a new conversation, and when the app exits.
 /// </summary>
-public sealed class WebTools(string dataFolder) : IDisposable
+public sealed class WebTools(string dataFolder) : ICancelableToolProvider, IDisposable
 {
     internal const string BlockedMessage = "The site blocked automated reading. Try another address, or ask the user before opening the visible browser.";
     internal const string CaptchaMessage = "This page requires a CAPTCHA. Ask the user before opening it in the visible browser.";
@@ -64,8 +64,11 @@ public sealed class WebTools(string dataFolder) : IDisposable
     private string? _profile;
     private int _generation;
 
-    [WindowsTool("web_search", "web", policyDriven: true, timeoutSeconds: 60)]
-    [Description("Search the public web in a hidden browser and return up to 5 titles, URLs, and snippets. No window is shown. The hidden browser closes when the request ends. If the search is blocked or requires a CAPTCHA, ask the user before opening the visible browser. Remote endpoints require approval to receive content.")]
+    [Tool("web_search",
+          "web",
+          "Search the public web in a hidden browser and return up to 5 titles, URLs, and snippets. No window is shown. The hidden browser closes when the request ends. If the search is blocked or requires a CAPTCHA, ask the user before opening the visible browser. Remote endpoints require approval to receive content.",
+          policyDriven: true,
+          timeoutSeconds: 60)]
     public async Task<string> Search(string query, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query))
@@ -94,8 +97,11 @@ public sealed class WebTools(string dataFolder) : IDisposable
         return $"No structured results on {page.Url}. Page text:\n{excerpt}";
     }
 
-    [WindowsTool("web_read", "web", policyDriven: true, timeoutSeconds: 60)]
-    [Description("Read the visible text of an http or https page in a hidden browser, excluding HTML markup, scripts, styles, and hidden content. No window is shown. If the page requires sign-in or a CAPTCHA, or the site blocks automated reading, ask the user before opening the visible browser. Remote endpoints require approval to receive content.")]
+    [Tool("web_read",
+          "web",
+          "Read the visible text of an http or https page in a hidden browser, excluding HTML markup, scripts, styles, and hidden content. No window is shown. If the page requires sign-in or a CAPTCHA, or the site blocks automated reading, ask the user before opening the visible browser. Remote endpoints require approval to receive content.",
+          policyDriven: true,
+          timeoutSeconds: 60)]
     public async Task<string> Read(string url, CancellationToken cancellationToken = default)
     {
         var uri = BrowserTools.WebUrl(url);
@@ -193,6 +199,8 @@ public sealed class WebTools(string dataFolder) : IDisposable
     }
 
     public void Dispose() => Close();
+
+    void ICancelableToolProvider.CancelPending() => Close();
 
     /// <summary>Closes only the hidden research browser. The visible browser keeps its windows.</summary>
     public void Close()

@@ -1,6 +1,7 @@
 using WindowsAxon.Agent.Settings;
 using WindowsAxon.Agent.SubAgents;
 using WindowsAxon.Agent.Tests.Fakes;
+using WindowsAxon.Agent.Tools;
 using NSubstitute;
 
 namespace WindowsAxon.Agent.Tests.SubAgents;
@@ -43,6 +44,33 @@ public class DelegateFunctionTests
         Assert.DoesNotContain("net_ping", names);
         Assert.DoesNotContain("wallpaper_set", names);
         Assert.DoesNotContain("enable_tools", names);
+    }
+
+    [Fact]
+    public async Task Main_agent_keeps_always_include_tools_and_sub_agents_do_not_own_them()
+    {
+        var catalog = new ToolCatalog();
+        catalog.Add(AIFunctionFactory.Create(() => "", "app_find"), "apps", RiskLevel.Read, alwaysInclude: true);
+        catalog.Add(AIFunctionFactory.Create(() => "", "app_list"), "apps", RiskLevel.Read);
+        catalog.Add(AIFunctionFactory.Create(() => "", "ui_list_windows"), "desktop_ui", RiskLevel.Read, alwaysInclude: true);
+        catalog.Add(AIFunctionFactory.Create(() => "", "ui_close_window"), "desktop_ui", RiskLevel.Change, alwaysInclude: true);
+        catalog.Add(AIFunctionFactory.Create(() => "", "ui_click"), "desktop_ui", RiskLevel.Change);
+        var deps = AgentFactoryTests.Dependencies(new ScriptedChatClient(),
+                                                  new ChatSettings { ToolSelection = ToolSelectionMode.SubAgents },
+                                                  catalog);
+
+        var session = await new AgentFactory(deps).CreateSessionAsync(Ct);
+
+        var names = session.Tools.Select(t => t.Name).ToList();
+        Assert.Contains("app_find", names);
+        Assert.DoesNotContain("app_list", names);
+        var apps = SubAgentCatalog.Find("apps")!;
+        Assert.False(apps.Includes(catalog.Find("app_find")!));
+        Assert.True(apps.Includes(catalog.Find("app_list")!));
+        var desktop = SubAgentCatalog.Find("desktop")!;
+        Assert.True(desktop.Includes(catalog.Find("ui_list_windows")!)); // ExtraTools
+        Assert.False(desktop.Includes(catalog.Find("ui_close_window")!));
+        Assert.True(desktop.Includes(catalog.Find("ui_click")!));
     }
 
     [Fact]

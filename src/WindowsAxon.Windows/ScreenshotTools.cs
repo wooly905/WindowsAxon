@@ -1,10 +1,10 @@
-using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Extensions.AI;
+using WindowsAxon.Agent.Tools;
 
 namespace WindowsAxon.Windows;
 
@@ -12,8 +12,10 @@ public sealed class ScreenshotTools(DesktopUiTools ui)
 {
     internal const int MaxSide = 1280;
 
-    [WindowsTool("ui_screenshot", "desktop_ui", policyDriven: true)]
-    [Description("Capture an image of one window ID from ui_list_windows, scaled to at most 1280 pixels. Use it when ui_snapshot cannot show the content, such as a canvas or a custom-drawn app, or to check a visual result. Blocks security, credential, remote-desktop, password-manager, and WindowsAxon windows. Remote endpoints require approval.")]
+    [Tool("ui_screenshot",
+          "desktop_ui",
+          "Capture an image of one window ID from ui_list_windows, scaled to at most 1280 pixels. Use it when ui_snapshot cannot show the content, such as a canvas or a custom-drawn app, or to check a visual result. Blocks security, credential, remote-desktop, password-manager, and WindowsAxon windows. Remote endpoints require approval.",
+          policyDriven: true)]
     public Task<IEnumerable<AIContent>> Capture(string windowId)
     {
         return StaThread.Run<IEnumerable<AIContent>>(() =>

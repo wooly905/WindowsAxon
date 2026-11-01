@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Automation;
@@ -103,7 +102,8 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
                 throw new ArgumentException("Brush size must be 1-100.");
             }
 
-            var slider = Control(root, "Size", type: ControlType.Slider);
+            AutomationElement slider = Control(root, "Size", type: ControlType.Slider);
+
             if (!slider.TryGetCurrentPattern(RangeValuePattern.Pattern, out var value))
             {
                 throw new NotSupportedException("Brush size control does not support RangeValuePattern.");
@@ -121,7 +121,7 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
 
     private static void WaitForTool(AutomationElement root, string tool)
     {
-        for (var attempt = 0; attempt < 20; attempt++)
+        for (int attempt = 0; attempt < 20; attempt++)
         {
             if (Control(root, "Canvas", "image").Current.Name.Contains(tool, StringComparison.OrdinalIgnoreCase))
             {
@@ -133,8 +133,10 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
         throw new InvalidOperationException($"Paint did not confirm the {tool} tool is active.");
     }
 
-    [WindowsTool("paint_new_canvas", "desktop_ui", RiskLevel.Change)]
-    [Description("Create a new Paint image in a selected window. Preserves any unsaved-image prompt. Optional width and height use Paint's image Properties dialog. Requires English Paint controls when automation IDs are absent.")]
+    [Tool("paint_new_canvas",
+          "desktop_ui",
+          "Create a new Paint image in a selected window. Preserves any unsaved-image prompt. Optional width and height use Paint's image Properties dialog. Requires English Paint controls when automation IDs are absent.",
+          RiskLevel.Change)]
     public Task<string> New(string windowId,
                             int? width = null,
                             int? height = null,
@@ -198,8 +200,10 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
         });
     }
 
-    [WindowsTool("paint_draw_shape", "desktop_ui", RiskLevel.Change)]
-    [Description("Draw line, rectangle, oval, circle, triangle, or arrow on a fully visible Paint canvas. Points use 0-1000 coordinates. Optional English palette color and brush size. Ctrl+Alt+Q stops input.")]
+    [Tool("paint_draw_shape",
+          "desktop_ui",
+          "Draw line, rectangle, oval, circle, triangle, or arrow on a fully visible Paint canvas. Points use 0-1000 coordinates. Optional English palette color and brush size. Ctrl+Alt+Q stops input.",
+          RiskLevel.Change)]
     public Task<string> Shape(string windowId,
                               string shape,
                               double startX,
@@ -251,8 +255,10 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
         });
     }
 
-    [WindowsTool("paint_draw_free", "desktop_ui", RiskLevel.Change)]
-    [Description("Draw a freehand path with Paint's pencil. points is an array of [x,y] pairs on a 0-1000 canvas scale. Optional English palette color and size.")]
+    [Tool("paint_draw_free",
+          "desktop_ui",
+          "Draw a freehand path with Paint's pencil. points is an array of [x,y] pairs on a 0-1000 canvas scale. Optional English palette color and size.",
+          RiskLevel.Change)]
     public Task<string> Free(string windowId,
                              double[][] points,
                              string? color = null,
@@ -281,8 +287,10 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
         });
     }
 
-    [WindowsTool("paint_add_text", "desktop_ui", RiskLevel.Change)]
-    [Description("Add text in a Paint text box at a 0-1000 canvas position. The whole canvas must be visible.")]
+    [Tool("paint_add_text",
+          "desktop_ui",
+          "Add text in a Paint text box at a 0-1000 canvas position. The whole canvas must be visible.",
+          RiskLevel.Change)]
     public Task<string> Text(string windowId,
                              string text,
                              double x,
@@ -309,8 +317,10 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
         });
     }
 
-    [WindowsTool("paint_save", "desktop_ui", RiskLevel.Change)]
-    [Description("Save a Paint image to a new absolute file path. Refuses overwriting an existing file. Uses Paint's Save As dialog and verifies that the resulting file exists.")]
+    [Tool("paint_save",
+          "desktop_ui",
+          "Save a Paint image to a new absolute file path. Refuses overwriting an existing file. Uses Paint's Save As dialog and verifies that the resulting file exists.",
+          RiskLevel.Change)]
     public Task<string> Save(string windowId, string path, CancellationToken cancellationToken)
     {
         return StaThread.Run(() =>

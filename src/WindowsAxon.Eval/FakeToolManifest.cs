@@ -1,8 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using WindowsAxon.Agent.Steps;
 using WindowsAxon.Agent.Tools;
-using Microsoft.Extensions.AI;
 
 namespace WindowsAxon.Eval;
 
@@ -12,32 +10,10 @@ public sealed record FakeToolSpec(string Name,
                                   RiskLevel Risk,
                                   bool PolicyDriven,
                                   JsonElement Parameters,
-                                  string Output);
+                                  string Output,
+                                  bool AlwaysInclude = false);
 
 public sealed record ToolCallRecord(string Name, IReadOnlyDictionary<string, string> Args);
-
-/// <summary>A tool with the real name and schema and a fixed output. Results do not depend on the computer.</summary>
-public sealed class FakeAIFunction(FakeToolSpec spec, string output, List<ToolCallRecord> calls) : AIFunction
-{
-    public override string Name => spec.Name;
-
-    public override string Description => spec.Description;
-
-    public override JsonElement JsonSchema => spec.Parameters;
-
-    protected override ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments,
-                                                          CancellationToken cancellationToken)
-    {
-        lock (calls)
-        {
-            calls.Add(new ToolCallRecord(spec.Name,
-                                         arguments.ToDictionary(a => a.Key,
-                                                                a => TranscriptWriter.ObservationText(a.Value))));
-        }
-
-        return ValueTask.FromResult<object?>(output);
-    }
-}
 
 public static class FakeToolManifest
 {
@@ -59,7 +35,11 @@ public static class FakeToolManifest
         foreach (var spec in specs)
         {
             var output = outputs.GetValueOrDefault(spec.Name, spec.Output);
-            catalog.Add(new FakeAIFunction(spec, output, calls), spec.Group, spec.Risk, spec.PolicyDriven);
+            catalog.Add(new FakeAIFunction(spec, output, calls),
+                        spec.Group,
+                        spec.Risk,
+                        spec.PolicyDriven,
+                        alwaysInclude: spec.AlwaysInclude);
         }
 
         return catalog;

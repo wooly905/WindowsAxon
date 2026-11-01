@@ -59,8 +59,9 @@ public sealed class SettingsTools(UndoJournal journal, string session) : IUndoRe
         "msinfo32.exe"
 ];
 
-    [WindowsTool("settings_open", "settings")]
-    [Description("Open a Windows Settings page from a fixed allowlist: display, sound, network-wifi, network-ethernet, network-status, bluetooth, printers, windowsupdate, appsfeatures, startupapps, personalization, personalization-background, personalization-colors, powersleep, battery, about, storage.")]
+    [Tool("settings_open",
+          "settings",
+          "Open a Windows Settings page from a fixed allowlist: display, sound, network-wifi, network-ethernet, network-status, bluetooth, printers, windowsupdate, appsfeatures, startupapps, personalization, personalization-background, personalization-colors, powersleep, battery, about, storage.")]
     public string OpenSettings(string page)
     {
         if (!SettingsPages.Contains(page))
@@ -71,8 +72,9 @@ public sealed class SettingsTools(UndoJournal journal, string session) : IUndoRe
         return Shell("ms-settings:" + page);
     }
 
-    [WindowsTool("control_panel_open", "settings")]
-    [Description("Open an allowlisted canonical Control Panel item: Microsoft.ProgramsAndFeatures, Microsoft.NetworkAndSharingCenter, Microsoft.DevicesAndPrinters, Microsoft.PowerOptions, Microsoft.CredentialManager, Microsoft.Sound, Microsoft.System, Microsoft.Mouse, Microsoft.Keyboard.")]
+    [Tool("control_panel_open",
+          "settings",
+          "Open an allowlisted canonical Control Panel item: Microsoft.ProgramsAndFeatures, Microsoft.NetworkAndSharingCenter, Microsoft.DevicesAndPrinters, Microsoft.PowerOptions, Microsoft.CredentialManager, Microsoft.Sound, Microsoft.System, Microsoft.Mouse, Microsoft.Keyboard.")]
     public string OpenControlPanel(string name)
     {
         if (!ControlPanels.Contains(name))
@@ -83,8 +85,9 @@ public sealed class SettingsTools(UndoJournal journal, string session) : IUndoRe
         return Shell("control.exe", ["/name", name]);
     }
 
-    [WindowsTool("admin_tool_open", "settings")]
-    [Description("Launch a Windows management console: Disk Management (diskmgmt.msc), Device Manager (devmgmt.msc), eventvwr.msc, services.msc, taskschd.msc, compmgmt.msc, printmanagement.msc, perfmon.exe, resmon.exe, or msinfo32.exe. Windows handles any UAC prompt. Reports opened only after verifying a visible window; otherwise reports an unverified launch request.")]
+    [Tool("admin_tool_open",
+          "settings",
+          "Launch a Windows management console: Disk Management (diskmgmt.msc), Device Manager (devmgmt.msc), eventvwr.msc, services.msc, taskschd.msc, compmgmt.msc, printmanagement.msc, perfmon.exe, resmon.exe, or msinfo32.exe. Windows handles any UAC prompt. Reports opened only after verifying a visible window; otherwise reports an unverified launch request.")]
     public string OpenAdmin(string name) => OpenAdmin(name, LaunchAdminAndVerify);
 
     internal static string OpenAdmin(string name, Func<ProcessStartInfo, bool> launchAndVerify)
@@ -178,12 +181,15 @@ public sealed class SettingsTools(UndoJournal journal, string session) : IUndoRe
         return $"Setting updated and read back: {actual}. Undo is available.";
     }
 
-    [WindowsTool("wallpaper_get", "personalize")]
-    [Description("Read the current wallpaper path and style values.")]
+    [Tool("wallpaper_get",
+          "personalize",
+          "Read the current wallpaper path and style values.")]
     public string? Wallpaper() => ReadCurrent("wallpaper");
 
-    [WindowsTool("wallpaper_set", "personalize", RiskLevel.Change)]
-    [Description("Set wallpaper to an existing jpg, jpeg, png, or bmp file. style: fill, fit, stretch, center, tile. Undo supported.")]
+    [Tool("wallpaper_set",
+          "personalize",
+          "Set wallpaper to an existing jpg, jpeg, png, or bmp file. style: fill, fit, stretch, center, tile. Undo supported.",
+          RiskLevel.Change)]
     public string WallpaperSet(string path, string style = "fill")
     {
         path = Path.GetFullPath(path);
@@ -207,12 +213,15 @@ public sealed class SettingsTools(UndoJournal journal, string session) : IUndoRe
                       JsonSerializer.Serialize(new[] { path, values.Item1, values.Item2 }));
     }
 
-    [WindowsTool("theme_get", "personalize")]
-    [Description("Read apps/Windows light-mode values and the current theme file.")]
+    [Tool("theme_get",
+          "personalize",
+          "Read apps/Windows light-mode values and the current theme file.")]
     public object Theme() => new { Mode = ReadCurrent("theme-mode"), File = ReadCurrent("theme-file") };
 
-    [WindowsTool("theme_set_mode", "personalize", RiskLevel.Change)]
-    [Description("Set light or dark mode for apps, windows, or both. Undo supported.")]
+    [Tool("theme_set_mode",
+          "personalize",
+          "Set light or dark mode for apps, windows, or both. Undo supported.",
+          RiskLevel.Change)]
     public string ThemeMode(string mode, string target = "both")
     {
         if (mode is not ("light" or "dark") || target is not ("apps" or "windows" or "both"))
@@ -234,8 +243,9 @@ public sealed class SettingsTools(UndoJournal journal, string session) : IUndoRe
         return Change("theme-mode", "theme_set_mode", JsonSerializer.Serialize(current));
     }
 
-    [WindowsTool("theme_list", "personalize")]
-    [Description("List installed Windows and current-user theme files.")]
+    [Tool("theme_list",
+          "personalize",
+          "List installed Windows and current-user theme files.")]
     public object Themes() => ThemeFiles().ToArray();
 
     private static IEnumerable<string> ThemeFiles() => new[] {
@@ -252,8 +262,10 @@ public sealed class SettingsTools(UndoJournal journal, string session) : IUndoRe
                                                        "*.theme",
                                                        SearchOption.AllDirectories));
 
-    [WindowsTool("theme_apply", "personalize", RiskLevel.Change)]
-    [Description("Apply a theme file returned by theme_list. Undo supported.")]
+    [Tool("theme_apply",
+          "personalize",
+          "Apply a theme file returned by theme_list. Undo supported.",
+          RiskLevel.Change)]
     public string ThemeApply(string path)
     {
         path = Path.GetFullPath(path);
@@ -265,8 +277,9 @@ public sealed class SettingsTools(UndoJournal journal, string session) : IUndoRe
         return Change("theme-file", "theme_apply", path);
     }
 
-    [WindowsTool("volume_get", "devices")]
-    [Description("Read default audio output device, level, and mute state.")]
+    [Tool("volume_get",
+          "devices",
+          "Read default audio output device, level, and mute state.")]
     public object Volume()
     {
         using var enumerator = new MMDeviceEnumerator();
@@ -279,8 +292,10 @@ public sealed class SettingsTools(UndoJournal journal, string session) : IUndoRe
         };
     }
 
-    [WindowsTool("volume_set", "devices", RiskLevel.Change)]
-    [Description("Set volume 0-100, optionally mute or unmute. Undo supported.")]
+    [Tool("volume_set",
+          "devices",
+          "Set volume 0-100, optionally mute or unmute. Undo supported.",
+          RiskLevel.Change)]
     public string VolumeSet(int level, bool? mute = null)
     {
         if (level is < 0 or > 100)
@@ -298,8 +313,10 @@ public sealed class SettingsTools(UndoJournal journal, string session) : IUndoRe
                       }));
     }
 
-    [WindowsTool("brightness_set", "devices", RiskLevel.Change)]
-    [Description("Set built-in display brightness 0-100. External monitors are not supported. Undo supported.")]
+    [Tool("brightness_set",
+          "devices",
+          "Set built-in display brightness 0-100. External monitors are not supported. Undo supported.",
+          RiskLevel.Change)]
     public string Brightness(int level)
     {
         if (level is < 0 or > 100)
@@ -310,21 +327,26 @@ public sealed class SettingsTools(UndoJournal journal, string session) : IUndoRe
         return Change("brightness", "brightness_set", level.ToString());
     }
 
-    [WindowsTool("power_plan_list", "devices")]
-    [Description("Read available Windows power plan GUIDs and names.")]
+    [Tool("power_plan_list",
+          "devices",
+          "Read available Windows power plan GUIDs and names.")]
     public Task<string> PowerPlans(CancellationToken cancellationToken) => WindowsCommand.RunAsync("powercfg.exe",
                                                                                                    ["/list"],
                                                                                                    cancellationToken);
 
-    [WindowsTool("power_plan_set", "devices", RiskLevel.Change)]
-    [Description("Activate an existing Windows power plan GUID. Undo supported.")]
+    [Tool("power_plan_set",
+          "devices",
+          "Activate an existing Windows power plan GUID. Undo supported.",
+          RiskLevel.Change)]
     public string PowerPlan(string id)
     {
         return Change("power-plan", "power_plan_set", Guid.Parse(id).ToString());
     }
 
-    [WindowsTool("printer_set_default", "printers", RiskLevel.Change)]
-    [Description("Set an installed printer as the Windows default. Undo supported.")]
+    [Tool("printer_set_default",
+          "printers",
+          "Set an installed printer as the Windows default. Undo supported.",
+          RiskLevel.Change)]
     public string DefaultPrinter(string name)
     {
         if (!SystemTools.Query("SELECT Name FROM Win32_Printer")

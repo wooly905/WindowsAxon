@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using Microsoft.Extensions.AI;
 using WindowsAxon.Agent.Approval;
 using WindowsAxon.Agent.Tools;
-using Microsoft.Extensions.AI;
 
 namespace WindowsAxon.App;
 
@@ -27,31 +27,10 @@ internal sealed class WindowsAppTools : IApprovalRule
         _apps = readIndex();
     }
 
-    public ToolCatalog BuildCatalog()
-    {
-        var catalog = new ToolCatalog();
-        catalog.Add(AIFunctionFactory.Create(Find,
-                                             "app_find",
-                                             "Find installed applications by name. Returns up to five matches with IDs."),
-                    ToolCatalog.BaseGroup,
-                    RiskLevel.Read);
-        catalog.Add(AIFunctionFactory.Create(LaunchAsync,
-                                             "app_launch",
-                                             "Start an installed application using an ID returned by app_find. Files and command-line arguments are not supported. A launch request alone does not confirm a window opened."),
-                    ToolCatalog.BaseGroup,
-                    RiskLevel.Read,
-                    policyDriven: true);
-        catalog.Add(AIFunctionFactory.Create(Refresh, "app_refresh_index", "Refresh the installed application index."),
-                    ToolCatalog.BaseGroup,
-                    RiskLevel.Read);
-        catalog.Add(AIFunctionFactory.Create(List,
-                                             "app_list",
-                                             "List up to 50 indexed applications, optionally filtering by name."),
-                    "apps",
-                    RiskLevel.Read);
-        return catalog;
-    }
-
+    [Tool("app_find",
+          "apps",
+          "Find installed applications by name. Returns up to five matches with IDs.",
+          alwaysInclude: true)]
     internal IReadOnlyList<InstalledApp> Find(string name)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -60,11 +39,9 @@ internal sealed class WindowsAppTools : IApprovalRule
         }
 
         name = name.Trim();
-        var tokens = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return _apps.Select(app => (App: app, Score: app.Name.Equals(name, StringComparison.OrdinalIgnoreCase)
-            || name.Equals("paint", StringComparison.OrdinalIgnoreCase)
-            && app.Id.StartsWith("Microsoft.Paint_",
-                                         StringComparison.OrdinalIgnoreCase)
+        string[] tokens = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        return _apps.Select(app => (App: app, Score: app.Name.Equals(name, StringComparison.OrdinalIgnoreCase) || name.Equals("paint", StringComparison.OrdinalIgnoreCase) && app.Id.StartsWith("Microsoft.Paint_", StringComparison.OrdinalIgnoreCase)
             ? 0 : tokens.All(token => app.Name.Contains(token, StringComparison.OrdinalIgnoreCase)) ? 1 : 2))
             .Where(match => match.Score < 2)
             .OrderBy(match => match.Score)
@@ -74,17 +51,25 @@ internal sealed class WindowsAppTools : IApprovalRule
             .ToList();
     }
 
+    [Tool("app_launch",
+          "apps",
+          "Start an installed application using an ID returned by app_find. Files and command-line arguments are not supported. A launch request alone does not confirm a window opened.",
+          policyDriven: true,
+          alwaysInclude: true)]
     internal Task<string> LaunchAsync(string id, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var app = _apps.FirstOrDefault(app => app.Id.Equals(id, StringComparison.Ordinal));
-        if (app is null)
-        {
-            throw new ArgumentException("The application ID is not in the installed app index. Use app_find first.");
-        }
-        return _launch(app, cancellationToken);
+        InstalledApp? app = _apps.FirstOrDefault(app => app.Id.Equals(id, StringComparison.Ordinal));
+
+        return app is null
+            ? throw new ArgumentException("The application ID is not in the installed app index. Use app_find first.")
+            : _launch(app, cancellationToken);
     }
 
+    [Tool("app_refresh_index",
+          "apps",
+          "Refresh the installed application index.",
+          alwaysInclude: true)]
     internal string Refresh()
     {
         _apps = _readIndex();
@@ -93,8 +78,10 @@ internal sealed class WindowsAppTools : IApprovalRule
 
     public bool AppliesTo(string toolName) => toolName == "app_launch";
 
-    internal IReadOnlyList<InstalledApp> List(string name = "") => _apps.Where(app => app.Name.Contains(name,
-                                                                                                        StringComparison.OrdinalIgnoreCase))
+    [Tool("app_list",
+          "apps",
+          "List up to 50 indexed applications, optionally filtering by name.")]
+    internal IReadOnlyList<InstalledApp> List(string name = "") => _apps.Where(app => app.Name.Contains(name, StringComparison.OrdinalIgnoreCase))
         .OrderBy(app => app.Name, StringComparer.OrdinalIgnoreCase)
         .Take(50)
         .ToArray();
@@ -103,12 +90,14 @@ internal sealed class WindowsAppTools : IApprovalRule
     {
         var idValue = call.Arguments is { } arguments
             && arguments.TryGetValue("id", out var argument) ? argument : null;
+
         var id = idValue switch
         {
             string value => value,
             JsonElement { ValueKind: JsonValueKind.String } value => value.GetString(),
             _ => null,
         };
+
         return call.Arguments?.Count == 1 && _apps.Any(app => app.Id == id)
             ? new ApprovalDecision(ApprovalOutcome.AutoApprove, false, null)
             : new ApprovalDecision(ApprovalOutcome.Ask,
@@ -130,10 +119,12 @@ internal sealed class WindowsAppTools : IApprovalRule
         {
             folder = shell.Namespace("shell:AppsFolder") ?? throw new InvalidOperationException("Windows could not read the installed app index.");
             items = folder.Items();
-            var apps = new List<InstalledApp>();
+            List<InstalledApp> apps = [];
+
             for (var index = 0; index < (int)items.Count; index++)
             {
                 dynamic item = items.Item(index);
+
                 try
                 {
                     var id = (string)item.Path;
@@ -148,6 +139,7 @@ internal sealed class WindowsAppTools : IApprovalRule
                     Marshal.ReleaseComObject(item);
                 }
             }
+
             return apps.DistinctBy(app => app.Id).ToList();
         }
         finally
@@ -176,6 +168,7 @@ internal sealed class WindowsAppTools : IApprovalRule
         if (!app.Id.Contains('!'))
         {
             dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application", throwOnError: true)!)!;
+
             try
             {
                 shell.ShellExecute($"shell:AppsFolder\\{app.Id}", "", "", "open", 1);
@@ -187,9 +180,9 @@ internal sealed class WindowsAppTools : IApprovalRule
             }
         }
 
-        var manager = (IApplicationActivationManager)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C"),
-                                                                                                    throwOnError: true)!)!;
+        var manager = (IApplicationActivationManager)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C"), throwOnError: true)!)!;
         uint processId;
+
         try
         {
             Marshal.ThrowExceptionForHR(manager.ActivateApplication(app.Id, "", 2, out processId));
@@ -201,6 +194,7 @@ internal sealed class WindowsAppTools : IApprovalRule
 
         using var process = Process.GetProcessById(checked((int)processId));
         var wait = Stopwatch.StartNew();
+
         while (wait.Elapsed < TimeSpan.FromSeconds(10))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -216,6 +210,7 @@ internal sealed class WindowsAppTools : IApprovalRule
             }
             await Task.Delay(100, cancellationToken);
         }
+
         throw new InvalidOperationException($"Windows started {app.Name}, but a visible window could not be verified. Do not report that it is open.");
     }
 

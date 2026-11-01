@@ -55,7 +55,7 @@ public sealed class WindowsToolSet : IDisposable
             ToolRegistration.Add(catalog, provider);
         }
 
-        new UndoTools(journal, [files, registry, settings], session).Register(catalog);
+        ToolRegistration.Add(catalog, new UndoTools(journal, [files, registry, settings], session));
         ApprovalRules = [_browser, ui, paint, scripts, software, utilities, _docs, new UndoApprovalRule(journal)];
     }
 

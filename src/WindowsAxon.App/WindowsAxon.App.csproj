@@ -1,4 +1,5 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
@@ -8,7 +9,6 @@
     <PlaywrightPlatform>win-x64</PlaywrightPlatform>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <UseWinUI>true</UseWinUI>
-    <UseXamlCompilerExecutable>true</UseXamlCompilerExecutable>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <!-- WinUI looks up resources.pri or <exe name>.pri; CD renames the exe, so use the fixed name. -->
@@ -33,4 +33,7 @@
       <_AppxLayoutAssetPackageFiles Include="@(PackagingOutputs)" Condition="'%(PackagingOutputs.NuGetPackageId)' == 'Microsoft.Playwright' or $([System.String]::Copy('%(PackagingOutputs.TargetPath)').StartsWith('.playwright'))" />
     </ItemGroup>
   </Target>
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+  <!-- C# XAML compilation does not use MSVC; WinUI's default target assumes it is installed. -->
+  <Target Name="GetVCInstallPath" />
 </Project>

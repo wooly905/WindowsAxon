@@ -1,12 +1,13 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.AI;
 using WindowsAxon.Agent;
 using WindowsAxon.Agent.Approval;
 using WindowsAxon.Agent.Audit;
 using WindowsAxon.Agent.Selection;
 using WindowsAxon.Agent.Settings;
 using WindowsAxon.Agent.Skills;
-using Microsoft.Extensions.AI;
+using WindowsAxon.Agent.Tools;
 using WindowsAxon.Windows;
 
 namespace WindowsAxon.App;
@@ -71,9 +72,10 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
             _model?.Dispose();
             _model = new EndpointFactory(Settings, new WindowsSecretStore()).CreateChatClient();
             var appTools = new WindowsAppTools();
-            var catalog = appTools.BuildCatalog();
             var windowTools = new WindowsWindowTools();
-            windowTools.AddTo(catalog);
+            var catalog = new ToolCatalog();
+            ToolRegistration.Add(catalog, appTools);
+            ToolRegistration.Add(catalog, windowTools);
             _toolSet = new WindowsToolSet(catalog,
                                           _model,
                                           DataFolder,

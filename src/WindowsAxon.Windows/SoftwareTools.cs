@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using WindowsAxon.Agent.Approval;
 using WindowsAxon.Agent.Tools;
 using Microsoft.Extensions.AI;
@@ -7,8 +6,10 @@ namespace WindowsAxon.Windows;
 
 public sealed class SoftwareTools : IApprovalRule
 {
-    [WindowsTool("winget_search", "apps", timeoutSeconds: 60)]
-    [Description("Search the winget source for software. Does not install packages.")]
+    [Tool("winget_search",
+          "apps",
+          "Search the winget source for software. Does not install packages.",
+          timeoutSeconds: 60)]
     public Task<string> Search(string query, CancellationToken cancellationToken) => WindowsCommand.RunAsync("winget.exe",
                                                                                                              [
 "search",
@@ -20,8 +21,12 @@ public sealed class SoftwareTools : IApprovalRule
 ],
                                                                                                              cancellationToken);
 
-    [WindowsTool("winget_install", "apps", RiskLevel.Danger, policyDriven: true, timeoutSeconds: 300)]
-    [Description("Install an exact winget package ID for the current user. Always requires approval. Accepts package and source agreements. Does not request administrator rights or override hash checks. No undo.")]
+    [Tool("winget_install",
+          "apps",
+          "Install an exact winget package ID for the current user. Always requires approval. Accepts package and source agreements. Does not request administrator rights or override hash checks. No undo.",
+          RiskLevel.Danger,
+          policyDriven: true,
+          timeoutSeconds: 300)]
     public Task<string> Install(string id, CancellationToken cancellationToken) => WindowsCommand.RunAsync("winget.exe",
                                                                                                            [
 "install",

@@ -1,14 +1,13 @@
-using System.ComponentModel;
 using System.Diagnostics;
-using WindowsAxon.Agent.Approval;
-using WindowsAxon.Agent.Tools;
 using Microsoft.Extensions.AI;
 using Microsoft.Playwright;
 using Microsoft.Win32;
+using WindowsAxon.Agent.Approval;
+using WindowsAxon.Agent.Tools;
 
 namespace WindowsAxon.Windows;
 
-public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDisposable
+public sealed class BrowserTools(string dataFolder) : IApprovalRule, ICancelableToolProvider, IAsyncDisposable
 {
     private IPlaywright? _playwright;
     private IBrowserContext? _context;
@@ -20,7 +19,8 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
 
     private async Task<IPage> PageAsync()
     {
-        var generation = _stopGeneration;
+        int generation = _stopGeneration;
+
         if (_context is null)
         {
             _playwright ??= await Playwright.CreateAsync();
@@ -30,6 +30,7 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
                                                      channel);
             context.SetDefaultTimeout(10000);
             _context = context;
+
             if (generation != _stopGeneration)
             {
                 CancelPending();
@@ -64,12 +65,14 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
                                                                     CancellationToken cancellationToken = default)
     {
         Directory.CreateDirectory(profile);
-        var timer = Stopwatch.StartNew();
-        var launched = false;
+        Stopwatch timer = Stopwatch.StartNew();
+        bool launched = false;
         Exception? lastError = null;
+
         while (timer.Elapsed < TimeSpan.FromSeconds(15))
         {
-            var endpoint = ReadBrowserEndpoint(profile);
+            string? endpoint = ReadBrowserEndpoint(profile);
+
             if (endpoint is not null)
             {
                 try
@@ -96,14 +99,15 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
 
             if (!launched)
             {
-                var ownProcess = started is not null;
-                var start = new ProcessStartInfo(BrowserExecutable(channel))
+                bool ownProcess = started is not null;
+                ProcessStartInfo start = new ProcessStartInfo(BrowserExecutable(channel))
                 {
                     UseShellExecute = !ownProcess,
                     WindowStyle = headless ? ProcessWindowStyle.Hidden : ProcessWindowStyle.Normal,
                     CreateNoWindow = ownProcess
                 };
-                foreach (var argument in new[]
+
+                foreach (string? argument in new[]
                 {
                     "--remote-debugging-port=0",
                     "--remote-debugging-address=127.0.0.1",
@@ -114,13 +118,16 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
                 {
                     start.ArgumentList.Add(argument);
                 }
+
                 if (headless)
                 {
                     start.ArgumentList.Add("--headless=new");
                 }
+
                 start.ArgumentList.Add("about:blank");
-                var process = Process.Start(start)
+                Process process = Process.Start(start)
                     ?? throw new InvalidOperationException("Could not start the browser.");
+
                 if (ownProcess)
                 {
                     started!(process);
@@ -129,6 +136,7 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
                 {
                     process.Dispose();
                 }
+
                 launched = true;
             }
 
@@ -136,19 +144,20 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
             await Task.Delay(100, cancellationToken);
         }
 
-        throw new InvalidOperationException("Could not connect to WindowsAxon's browser. Close an older WindowsAxon browser window and try again.",
-                                            lastError);
+        throw new InvalidOperationException("Could not connect to WindowsAxon's browser. Close an older WindowsAxon browser window and try again.", lastError);
     }
 
     private static string? ReadBrowserEndpoint(string profile)
     {
-        var path = Path.Combine(profile, "DevToolsActivePort");
+        string path = Path.Combine(profile, "DevToolsActivePort");
+
         if (!File.Exists(path))
         {
             return null;
         }
 
         string[] lines;
+
         try
         {
             lines = File.ReadAllLines(path);
@@ -176,8 +185,8 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
             }
         }
 
-        var relativePath = channel == "chrome" ? @"Google\Chrome\Application\chrome.exe"
-            : @"Microsoft\Edge\Application\msedge.exe";
+        string relativePath = channel == "chrome" ? @"Google\Chrome\Application\chrome.exe" : @"Microsoft\Edge\Application\msedge.exe";
+
         foreach (var folder in new[]
         {
             Environment.SpecialFolder.ProgramFiles,
@@ -206,8 +215,11 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
         return uri;
     }
 
-    [WindowsTool("browser_open", "browser", timeoutSeconds: 60, artifact: true)]
-    [Description("Open an http or https URL in WindowsAxon's separate, visible browser profile. The browser runs independently and stays open after WindowsAxon disconnects or exits. newTab opens a new tab. The user handles sign-in.")]
+    [Tool("browser_open",
+          "browser",
+          "Open an http or https URL in WindowsAxon's separate, visible browser profile. The browser runs independently and stays open after WindowsAxon disconnects or exits. newTab opens a new tab. The user handles sign-in.",
+          timeoutSeconds: 60,
+          artifact: true)]
     public async Task<string> Open(string url, bool newTab = false, CancellationToken cancellationToken = default)
     {
         var uri = WebUrl(url);
@@ -232,36 +244,44 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
         }
     }
 
-    [WindowsTool("browser_snapshot", "browser", policyDriven: true)]
-    [Description("Read up to 40 visible interactive elements with fresh ref IDs, names, and roles. Password and payment values are never included. Remote endpoints require approval to receive content.")]
+    [Tool("browser_snapshot",
+          "browser",
+          "Read up to 40 visible interactive elements with fresh ref IDs, names, and roles. Password and payment values are never included. Remote endpoints require approval to receive content.",
+          policyDriven: true)]
     public Task<object> Snapshot() => SnapshotCore(null, 40);
 
-    [WindowsTool("browser_find", "browser", policyDriven: true)]
-    [Description("Find up to 40 visible elements by text. Returns fresh refs; previously returned refs expire. Remote endpoints require approval to receive content.")]
+    [Tool("browser_find",
+          "browser",
+          "Find up to 40 visible elements by text. Returns fresh refs; previously returned refs expire. Remote endpoints require approval to receive content.",
+          policyDriven: true)]
     public Task<object> Find(string text) => SnapshotCore(text, 40);
 
     private async Task<object> SnapshotCore(string? text, int limit)
     {
-        var page = await PageAsync();
+        IPage page = await PageAsync();
         await CheckPageAsync(page);
         await ClearRefsAsync();
-        var elements = await page.QuerySelectorAllAsync("a,button,input,textarea,select,[role=button],[role=link],[role=checkbox],[role=searchbox],[role=textbox],h1,h2");
-        var results = new List<object>();
-        foreach (var element in elements)
+        IReadOnlyList<IElementHandle> elements = await page.QuerySelectorAllAsync("a,button,input,textarea,select,[role=button],[role=link],[role=checkbox],[role=searchbox],[role=textbox],h1,h2");
+        List<object> results = [];
+
+        foreach (IElementHandle element in elements)
         {
             if (!await element.IsVisibleAsync())
             {
                 await element.DisposeAsync();
                 continue;
             }
-            var name = await element.EvaluateAsync<string>("e => (e.getAttribute('aria-label') || e.labels?.[0]?.innerText || e.innerText || e.getAttribute('placeholder') || e.getAttribute('title') || '').trim().slice(0,160)");
+
+            string name = await element.EvaluateAsync<string>("e => (e.getAttribute('aria-label') || e.labels?.[0]?.innerText || e.innerText || e.getAttribute('placeholder') || e.getAttribute('title') || '').trim().slice(0,160)");
+
             if (text is not null && !name.Contains(text, StringComparison.OrdinalIgnoreCase) || results.Count == limit)
             {
                 await element.DisposeAsync();
                 continue;
             }
-            var role = await element.EvaluateAsync<string>("e => e.getAttribute('role') || e.tagName.toLowerCase()");
-            var id = Guid.NewGuid().ToString("N")[..8];
+
+            string role = await element.EvaluateAsync<string>("e => e.getAttribute('role') || e.tagName.toLowerCase()");
+            string id = Guid.NewGuid().ToString("N")[..8];
             _refs.Add(id, (page, element, name));
             results.Add(new
             {
@@ -280,8 +300,9 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
 
     private async Task<IElementHandle> Element(string reference, bool input = false)
     {
-        var page = await PageAsync();
+        IPage page = await PageAsync();
         await CheckPageAsync(page);
+
         if (!_refs.TryGetValue(reference, out var target) || target.Page != page
             || !await target.Element.EvaluateAsync<bool>("e => e.isConnected"))
         {
@@ -298,7 +319,7 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
 
     private static async Task CheckInput(IElementHandle element)
     {
-        var blocked = await element.EvaluateAsync<bool>("""
+        bool blocked = await element.EvaluateAsync<bool>("""
             e => { const a=(e.getAttribute('autocomplete')||'').toLowerCase();
               const n=[e.type,e.name,e.id,e.getAttribute('aria-label')].join(' ').toLowerCase();
               return e.type==='password' || a.includes('password') || a.includes('one-time-code') || a.startsWith('cc-') || /\b(otp|cvv|cvc|password|passcode)\b|credit.?card|card.?number|verification.?code|security.?code/.test(n); }
@@ -309,8 +330,10 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
         }
     }
 
-    [WindowsTool("browser_read", "browser", policyDriven: true)]
-    [Description("Read the full visible text of the page or a referenced element, excluding HTML markup, scripts, styles, and hidden content. Remote endpoints require approval to receive content.")]
+    [Tool("browser_read",
+          "browser",
+          "Read the full visible text of the page or a referenced element, excluding HTML markup, scripts, styles, and hidden content. Remote endpoints require approval to receive content.",
+          policyDriven: true)]
     public async Task<string> Read(string? reference = null)
     {
         var page = await PageAsync();
@@ -346,20 +369,27 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
             : await element.EvaluateAsync<string>(readText);
     }
 
-    [WindowsTool("browser_click", "browser", RiskLevel.Danger, policyDriven: true)]
-    [Description("Click a ref from the last snapshot. Requires approval each time, including send, buy, delete, and submit actions.")]
+    [Tool("browser_click",
+          "browser",
+          "Click a ref from the last snapshot. Requires approval each time, including send, buy, delete, and submit actions.",
+          RiskLevel.Danger,
+          policyDriven: true)]
     public async Task<string> Click(string reference)
     {
         await (await Element(reference)).ClickAsync();
         return "Clicked the selected element. Verify the resulting page before claiming the task is complete.";
     }
 
-    [WindowsTool("browser_type", "browser", RiskLevel.Change, policyDriven: true)]
-    [Description("Fill a text field by ref. Password, one-time-code, and payment fields are refused. submit presses Enter and requires approval.")]
+    [Tool("browser_type",
+          "browser",
+          "Fill a text field by ref. Password, one-time-code, and payment fields are refused. submit presses Enter and requires approval.",
+          RiskLevel.Change,
+          policyDriven: true)]
     public async Task<string> Type(string reference, string text, bool submit = false)
     {
-        var element = await Element(reference, true);
+        IElementHandle element = await Element(reference, true);
         await element.FillAsync(text);
+
         if (await element.InputValueAsync() != text)
         {
             throw new InvalidOperationException("Field value could not be verified.");
@@ -373,19 +403,23 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
         return submit ? "Text verified; Enter was pressed. Verify the resulting page." : "Field text verified.";
     }
 
-    [WindowsTool("browser_press", "browser", RiskLevel.Change, policyDriven: true)]
-    [Description("Press a key or shortcut in the focused browser field, for example Enter, Tab, Control+A. Refuses protected fields.")]
+    [Tool("browser_press",
+          "browser",
+          "Press a key or shortcut in the focused browser field, for example Enter, Tab, Control+A. Refuses protected fields.",
+          RiskLevel.Change,
+          policyDriven: true)]
     public async Task<string> Press(string key)
     {
-        var page = await PageAsync();
+        IPage page = await PageAsync();
         await CheckPageAsync(page);
-        var frame = page.MainFrame;
+        IFrame frame = page.MainFrame;
+
         while (true)
         {
-            var handle = await frame.EvaluateHandleAsync("() => { let active = document.activeElement; while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement; return active; }");
+            IJSHandle handle = await frame.EvaluateHandleAsync("() => { let active = document.activeElement; while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement; return active; }");
             try
             {
-                var active = handle.AsElement() ?? throw new UnauthorizedAccessException("The focused browser element could not be verified.");
+                IElementHandle active = handle.AsElement() ?? throw new UnauthorizedAccessException("The focused browser element could not be verified.");
                 if (await active.EvaluateAsync<bool>("e => e.tagName === 'IFRAME' || e.tagName === 'FRAME'"))
                 {
                     frame = await active.ContentFrameAsync() ?? throw new UnauthorizedAccessException("The focused browser frame could not be verified.");
@@ -401,12 +435,15 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
                 await handle.DisposeAsync();
             }
         }
+
         await page.Keyboard.PressAsync(key);
+
         return "Key sent. Verify the resulting page.";
     }
 
-    [WindowsTool("browser_scroll", "browser")]
-    [Description("Scroll up or down one viewport in the current browser page.")]
+    [Tool("browser_scroll",
+          "browser",
+          "Scroll up or down one viewport in the current browser page.")]
     public async Task<string> Scroll(string direction = "down")
     {
         if (direction is not ("up" or "down"))
@@ -414,28 +451,33 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
             throw new ArgumentException("direction must be up or down.");
         }
 
-        var page = await PageAsync();
+        IPage page = await PageAsync();
         await CheckPageAsync(page);
         await page.EvaluateAsync("d => window.scrollBy(0, innerHeight*(d==='up'?-1:1))", direction);
+
         return "Scrolled.";
     }
 
-    [WindowsTool("browser_back", "browser")]
-    [Description("Navigate back in the current tab.")]
+    [Tool("browser_back",
+          "browser",
+          "Navigate back in the current tab.")]
     public async Task<string> Back()
     {
-        var page = await PageAsync();
+        IPage page = await PageAsync();
         await page.GoBackAsync();
         await ClearRefsAsync();
+
         return page.Url;
     }
 
-    [WindowsTool("browser_tabs", "browser")]
-    [Description("List open WindowsAxon browser tabs with numeric IDs and URLs.")]
+    [Tool("browser_tabs",
+          "browser",
+          "List open WindowsAxon browser tabs with numeric IDs and URLs.")]
     public async Task<object> Tabs()
     {
         await PageAsync();
-        foreach (var page in _context!.Pages)
+
+        foreach (IPage page in _context!.Pages)
         {
             if (!_tabs.Values.Contains(page))
             {
@@ -448,12 +490,12 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
             Id = tab.Key,
             tab.Value.Url,
             Selected = tab.Value == _page
-        })
-            .ToArray();
+        }).ToArray();
     }
 
-    [WindowsTool("browser_tab_select", "browser")]
-    [Description("Select a tab ID returned by browser_tabs.")]
+    [Tool("browser_tab_select",
+          "browser",
+          "Select a tab ID returned by browser_tabs.")]
     public async Task<string> SelectTab(int id)
     {
         await PageAsync();
@@ -468,14 +510,16 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
         return _page.Url;
     }
 
-    [WindowsTool("browser_close", "browser")]
-    [Description("Close the current WindowsAxon browser tab. Does not close the user's separate browser windows.")]
+    [Tool("browser_close",
+          "browser",
+          "Close the current WindowsAxon browser tab. Does not close the user's separate browser windows.")]
     public async Task<string> Close()
     {
-        var page = await PageAsync();
+        IPage page = await PageAsync();
         await page.CloseAsync();
         _page = null;
         await ClearRefsAsync();
+
         return "Tab closed.";
     }
 
@@ -483,10 +527,11 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
 
     public ApprovalDecision Decide(FunctionCallContent call)
     {
-        var reference = call.Arguments is { } arguments
+        string? reference = call.Arguments is { } arguments
             && arguments.TryGetValue("reference", out var value) ? value?.ToString() : null;
-        var target = reference is not null
+        string target = reference is not null
             && _refs.TryGetValue(reference, out var element) ? element.Name : "focused browser element";
+
         return new ApprovalDecision(ApprovalOutcome.Ask,
                                     false,
                                     $"Website: {_page?.Url}\nElement: {target}. Verify any send, submit, purchase, or deletion before allowing.");
@@ -494,7 +539,7 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
 
     private async Task ClearRefsAsync()
     {
-        foreach (var target in _refs.Values)
+        foreach ((IPage Page, IElementHandle Element, string Name) target in _refs.Values)
         {
             await target.Element.DisposeAsync();
         }
@@ -505,7 +550,7 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, IAsyncDispo
     public void CancelPending()
     {
         Interlocked.Increment(ref _stopGeneration);
-        var playwright = _playwright;
+        IPlaywright? playwright = _playwright;
         _playwright = null;
         _context = null;
         _page = null;

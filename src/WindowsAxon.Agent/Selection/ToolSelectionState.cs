@@ -55,17 +55,18 @@ public sealed class ToolSelectionState(ToolCatalog catalog, int maxActiveTools, 
     {
         _history.Add(key);
         _active[key] = (tools, ++_clock);
-        var appControlGroup = key.StartsWith("group:", StringComparison.Ordinal)
-            && ToolCatalog.AppControlGroups.Contains(ActivationResult.ShortName(key));
+        bool appControlGroup = key.StartsWith("group:", StringComparison.Ordinal) && ToolCatalog.AppControlGroups.Contains(ActivationResult.ShortName(key));
+
         if (appControlGroup || tools.Any(IsAppControlTool))
         {
             Budget.AppControlUsed = true; // a group or a skill with browser or desktop_ui tools
         }
 
-        var removed = new List<(string, IReadOnlyList<string>)>();
+        List<(string, IReadOnlyList<string>)> removed = new List<(string, IReadOnlyList<string>)>();
+
         while (CountedTools() > maxActiveTools && _active.Count > 1)
         {
-            var oldest = _active.Where(a => a.Key != key).MinBy(a => a.Value.LastUsed);
+            KeyValuePair<string, (IReadOnlyList<string> Tools, long LastUsed)> oldest = _active.Where(a => a.Key != key).MinBy(a => a.Value.LastUsed);
             _active.Remove(oldest.Key);
             removed.Add((oldest.Key, oldest.Value.Tools.Where(t => !catalog.IsBaseTool(t)).ToList()));
         }
@@ -101,8 +102,7 @@ public sealed class ToolSelectionState(ToolCatalog catalog, int maxActiveTools, 
         AwaitingReply = false;
     }
 
-    private bool IsAppControlTool(string toolName) =>
-        catalog.Find(toolName)?.Group is { } group && ToolCatalog.AppControlGroups.Contains(group);
+    private bool IsAppControlTool(string toolName) => catalog.Find(toolName) is { AlwaysInclude: false } entry && ToolCatalog.AppControlGroups.Contains(entry.Group);
 
     private int CountedTools() => ActiveToolNames.Count(t => !catalog.IsBaseTool(t));
 }

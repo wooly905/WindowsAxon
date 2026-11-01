@@ -198,7 +198,7 @@ public sealed class WindowsWindowToolsTests
                                            _ => true,
                                            TimeSpan.Zero);
         var catalog = new ToolCatalog();
-        tools.AddTo(catalog);
+        ToolRegistration.Add(catalog, tools);
         var id = Assert.Single(tools.List()).Id;
         var call = new FunctionCallContent("1",
                                            "ui_close_window",

@@ -8,7 +8,7 @@ public class ToolSelectionStateTests
     private static ToolCatalog Catalog()
     {
         var catalog = new ToolCatalog();
-        catalog.Add(AIFunctionFactory.Create(() => "", "app_find"), ToolCatalog.BaseGroup, RiskLevel.Read);
+        catalog.Add(AIFunctionFactory.Create(() => "", "app_find"), "apps", RiskLevel.Read, alwaysInclude: true);
         return catalog;
     }
 
@@ -95,6 +95,19 @@ public class ToolSelectionStateTests
         Assert.True(byCall.IsActive("ui_click"));
         byCall.MarkUsed("ui_click");
         Assert.Equal(50, byCall.StepLimit);
+    }
+
+    [Fact]
+    public void Always_include_tool_in_an_app_control_group_keeps_the_base_limit()
+    {
+        var catalog = Catalog();
+        catalog.Add(AIFunctionFactory.Create(() => "", "ui_list_windows"), "desktop_ui", RiskLevel.Read, alwaysInclude: true);
+        var state = new ToolSelectionState(catalog, 14);
+
+        state.MarkUsed("ui_list_windows");
+
+        Assert.True(state.IsActive("ui_list_windows"));
+        Assert.Equal(ToolSelectionState.BaseLimit, state.StepLimit);
     }
 
     [Fact]
