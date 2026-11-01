@@ -147,10 +147,14 @@ public sealed class WebToolsTests
                                                                    cancellationToken: TestContext.Current.CancellationToken);
             var researchPage = research.Pages[0];
             await researchPage.SetContentAsync("<h1>Research</h1>");
+            var disconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            research.Browser!.Disconnected += (_, _) => disconnected.TrySetResult();
             tools.TrackForClose(research.Browser!, researchProcess, researchProfile);
 
             tools.Close();
 
+            // Browser shutdown and the CDP disconnect notification complete asynchronously.
+            await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
             Assert.NotNull(researchProcess);
             await Assert.ThrowsAnyAsync<PlaywrightException>(() => researchPage.TitleAsync());
             Assert.Equal("Visible", await visible.Pages[0].Locator("h1").InnerTextAsync());
