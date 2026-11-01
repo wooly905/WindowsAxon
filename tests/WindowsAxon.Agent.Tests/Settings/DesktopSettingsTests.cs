@@ -132,10 +132,10 @@ public sealed class DesktopSettingsTests : IDisposable
     }
 
     [Theory]
-    [InlineData("https://api.example.com/v1", "none", null, StepMode.Native)]
-    [InlineData("https://api.example.com/v1", "low", "low", StepMode.Native)]
+    [InlineData("https://api.example.com/v1", "none", null, StepMode.Structured)]
+    [InlineData("https://api.example.com/v1", "low", "low", StepMode.Structured)]
     [InlineData("http://localhost:11434/v1", "none", "none", StepMode.Structured)]
-    public void Remote_auto_settings_use_native_tools_and_omit_the_local_reasoning_default(string url,
+    public void Automatic_settings_defer_tool_mode_until_detection_and_keep_reasoning_preferences(string url,
                                                                                            string effort,
                                                                                            string? expected,
                                                                                            StepMode mode)

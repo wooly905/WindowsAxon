@@ -36,20 +36,21 @@ if (options.TryGetValue("tool-selection", out var toolSelection))
 }
 
 var evalRoot = Path.GetDirectoryName(Path.GetFullPath(options.GetValueOrDefault("tools", "eval/tools.json")))!;
-var factory = new EndpointFactory(settings, new EnvironmentSecretStore());
-var runner = new EvalRunner(factory.CreateChatClient,
-                            settings.Chat,
-                            FakeToolManifest.Load(options.GetValueOrDefault("tools", "eval/tools.json")),
-                            Path.GetFullPath(options.GetValueOrDefault("skills", "skills")),
-                            evalRoot,
-                            docsAvailable: options.ContainsKey("docs"));
-
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
 {
     e.Cancel = true;
     cts.Cancel();
 };
+
+var factory = await new EndpointFactory(settings, new EnvironmentSecretStore()).ResolveAsync(cts.Token);
+settings = factory.Settings;
+var runner = new EvalRunner(factory.CreateChatClient,
+                            settings.Chat,
+                            FakeToolManifest.Load(options.GetValueOrDefault("tools", "eval/tools.json")),
+                            Path.GetFullPath(options.GetValueOrDefault("skills", "skills")),
+                            evalRoot,
+                            docsAvailable: options.ContainsKey("docs"));
 
 var cases = EvalCase.LoadFolder(options.GetValueOrDefault("cases", "eval/cases"));
 var summary = await runner.RunAllAsync(cases, cts.Token);

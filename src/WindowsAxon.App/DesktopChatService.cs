@@ -70,7 +70,8 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
         {
             _toolSet?.Dispose();
             _model?.Dispose();
-            _model = new EndpointFactory(Settings, new WindowsSecretStore()).CreateChatClient();
+            var factory = await new EndpointFactory(Settings, new WindowsSecretStore()).ResolveAsync(cancellationToken);
+            _model = factory.CreateChatClient();
             var appTools = new WindowsAppTools();
             var windowTools = new WindowsWindowTools();
             var catalog = new ToolCatalog();
@@ -86,7 +87,7 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
             var skillsRoot = Path.Combine(AppContext.BaseDirectory, "app-skills");
             var audit = new ToolStartAuditLog(new JsonlAuditLog(Path.Combine(DataFolder, "logs")),
                                               tool => ToolStarted?.Invoke(tool));
-            var dependencies = new AgentDependencies(Settings.Chat,
+            var dependencies = new AgentDependencies(factory.Settings.Chat,
                                                      _model,
                                                      catalog,
                                                      SkillCatalog.Load([(skillsRoot, true)]),
@@ -228,6 +229,7 @@ appTools,
             File.Delete(temporaryPath);
         }
         NewChat();
+        EndpointFactory.ClearApiDetectionCache();
         Settings = updated;
         if (previousReference is not null && previousReference.StartsWith(ManagedCredentialPrefix,
                                                                           StringComparison.Ordinal)

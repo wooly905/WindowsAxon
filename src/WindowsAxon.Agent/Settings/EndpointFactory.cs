@@ -10,23 +10,78 @@ namespace WindowsAxon.Agent.Settings;
 public sealed class EndpointFactory(ModelSettings settings, ISecretStore secrets)
 {
     private const string CredentialPrefix = "credential:";
+    private readonly bool _detected;
+
+    private EndpointFactory(ModelSettings settings, ISecretStore secrets, bool detected) : this(settings, secrets)
+    {
+        _detected = detected;
+    }
 
     public ModelSettings Settings { get; } = settings;
 
+    public static void ClearApiDetectionCache() => EndpointApiDetector.Shared.Invalidate();
+
+    public async Task<EndpointFactory> ResolveAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ResolveKey(Settings.ChatEndpoint);
+        var automatic = Settings.ChatEndpoint.Api == EndpointApi.Automatic;
+        var api = automatic
+            ? await EndpointApiDetector.Shared.DetectAsync(Settings,
+                                                           candidate => CreateProtocolClient(candidate, automatic: true),
+                                                           cancellationToken)
+            : Settings.ChatEndpoint.Api;
+        var resolved = Settings with
+        {
+            Endpoints = new Dictionary<string, EndpointSettings>(Settings.Endpoints)
+            {
+                [Settings.Chat.Endpoint] = Settings.ChatEndpoint with { Api = api }
+            },
+            Chat = EffectiveChat(api, automatic)
+        };
+
+        return new EndpointFactory(resolved, secrets, automatic);
+    }
+
     public IChatClient CreateChatClient()
+    {
+        if (Settings.ChatEndpoint.Api == EndpointApi.Automatic)
+        {
+            throw new InvalidOperationException("Resolve the automatic API with ResolveAsync before creating a client.");
+        }
+
+        return CreateProtocolClient(Settings.ChatEndpoint.Api, _detected);
+    }
+
+    private ChatSettings EffectiveChat(EndpointApi api, bool automatic) => Settings.Chat with
+    {
+        StepMode = automatic || api == EndpointApi.Responses ? StepMode.Native : Settings.Chat.StepMode,
+        ReasoningEffortWhenThinkingOff = (automatic || Settings.IsChatRemote || api == EndpointApi.Responses)
+            && Settings.Chat.ReasoningEffortWhenThinkingOff == "none"
+            ? null : Settings.Chat.ReasoningEffortWhenThinkingOff
+    };
+
+    private IChatClient CreateProtocolClient(EndpointApi api, bool automatic)
     {
         var endpoint = Settings.ChatEndpoint;
         var client = new OpenAIClient(new ApiKeyCredential(ResolveKey(endpoint) ?? "none"), // the SDK needs a value for servers without a key
             new OpenAIClientOptions { Endpoint = new Uri(endpoint.BaseUrl), NetworkTimeout = TimeSpan.FromMinutes(5) });
-        var useResponses = Settings.UsesResponsesApi;
+        var useResponses = api == EndpointApi.Responses;
         IChatClient chat = useResponses
             ? client.GetResponsesClient().AsIChatClient(Settings.Chat.Model)
             : client.GetChatClient(Settings.Chat.Model).AsIChatClient();
-        if (useResponses)
+        if (useResponses || automatic)
         {
             chat = new ConfigureOptionsChatClient(chat,
                                                   options =>
                                                   {
+                                                      options.Temperature = null;
+
+                                                      if (!useResponses)
+                                                      {
+                                                          return;
+                                                      }
+
                                                       var previous = options.RawRepresentationFactory;
                                                       options.RawRepresentationFactory = model =>
                                                       {
@@ -37,9 +92,11 @@ public sealed class EndpointFactory(ModelSettings settings, ISecretStore secrets
                                                   });
         }
 
-        return Settings.Chat.Thinking || Settings.Chat.ReasoningEffortWhenThinkingOff is null
+        var chatSettings = EffectiveChat(api, automatic);
+
+        return chatSettings.Thinking || chatSettings.ReasoningEffortWhenThinkingOff is null
             ? chat
-            : new ReasoningEffortChatClient(chat, Settings.Chat.ReasoningEffortWhenThinkingOff);
+            : new ReasoningEffortChatClient(chat, chatSettings.ReasoningEffortWhenThinkingOff);
     }
 
     internal string? ResolveKey(EndpointSettings endpoint)
