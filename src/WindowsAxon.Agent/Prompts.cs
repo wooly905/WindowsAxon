@@ -22,7 +22,7 @@ public static class Prompts
             "To act inside a web page or an app window, take a snapshot first, then use the ref numbers.",
             "Do not click send, buy, delete, or similar buttons unless the user asked for it.",
             "Report an action as completed only when its tool result confirms success. A launch request without a verified window is only a request, not confirmation that the app is open.",
-            "If a script fails because of its own error, fix the task and create a new script. If PowerShell is blocked by policy or lacks permission, open the app or Settings window, enable desktop_ui, find the window with ui_list_windows, take a ui_snapshot, and use ui_click, ui_type, or ui_press_keys.",
+            "If a script fails because of its own error, fix the task and create a new script. Set script_run elevated true only for a change that needs administrator rights. Windows asks the user to approve administrator rights through UAC. Ordinary scripts use elevated false. Scripts must never request elevation themselves. If PowerShell is blocked by policy, open the app or Settings window, enable desktop_ui, find the window with ui_list_windows, take a ui_snapshot, and use ui_click, ui_type, or ui_press_keys.",
             "A script exit code of 0 confirms only script completion, not that an application opened. Successful scripts may leave child processes running. Use a dedicated launch tool and verify its result before claiming a window is open.",
         ];
 

@@ -23,6 +23,7 @@
     <PackageReference Include="Markdig" />
     <ProjectReference Include="..\WindowsAxon.Agent\WindowsAxon.Agent.csproj" />
     <ProjectReference Include="..\WindowsAxon.Windows\WindowsAxon.Windows.csproj" />
+    <ProjectReference Include="..\WindowsAxon.ScriptHost\WindowsAxon.ScriptHost.csproj" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="PublishSingleFile;SelfContained" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Assets\WindowsAxon.ico" CopyToOutputDirectory="PreserveNewest" />
@@ -34,6 +35,23 @@
     </ItemGroup>
   </Target>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+  <Target Name="CopyScriptHost" AfterTargets="Build" Condition="'$(PublishSingleFile)' != 'true'">
+    <ItemGroup>
+      <ScriptHostFiles Include="..\WindowsAxon.ScriptHost\bin\$(Configuration)\net10.0-windows\win-x64\WindowsAxon.ScriptHost.*" Exclude="..\WindowsAxon.ScriptHost\bin\$(Configuration)\net10.0-windows\win-x64\*.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ScriptHostFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="EmbedScriptHost" BeforeTargets="AssignTargetPaths" Condition="'$(PublishSingleFile)' == 'true'">
+    <PropertyGroup>
+      <ScriptHostPublishDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\obj\script-host\$(Configuration)\'))</ScriptHostPublishDir>
+    </PropertyGroup>
+    <MSBuild Projects="..\WindowsAxon.ScriptHost\WindowsAxon.ScriptHost.csproj" Targets="Restore;Publish" BuildInParallel="false"
+             RemoveProperties="OutputPath;IntermediateOutputPath;TargetFramework;IncludeAllContentForSelfExtract"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishSingleFile=true;PublishDir=$(ScriptHostPublishDir);DebugType=none" />
+    <ItemGroup>
+      <EmbeddedResource Include="$(ScriptHostPublishDir)WindowsAxon.ScriptHost.exe" LogicalName="WindowsAxon.ScriptHost.exe" />
+    </ItemGroup>
+  </Target>
   <!-- C# XAML compilation does not use MSVC; WinUI's default target assumes it is installed. -->
   <Target Name="GetVCInstallPath" />
 </Project>

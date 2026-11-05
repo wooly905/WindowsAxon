@@ -273,6 +273,10 @@
       "properties": {
         "id": {
           "type": "string"
+        },
+        "elevated": {
+          "type": "boolean",
+          "default": false
         }
       },
       "required": [

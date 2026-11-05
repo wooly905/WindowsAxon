@@ -222,7 +222,8 @@ public class AgentFactoryTests
         Assert.Contains("script_create with language 'powershell', then script_run", system);
         Assert.Contains("Do not answer with manual instructions", system);
         Assert.Contains("first inspect it with a read tool", system);
-        Assert.Contains("If PowerShell is blocked by policy or lacks permission", system);
+        Assert.Contains("Set script_run elevated true only for a change that needs administrator rights", system);
+        Assert.Contains("If PowerShell is blocked by policy", system);
         Assert.Contains("Do not give the user manual instructions", orchestrator);
         Assert.Contains("delegate to the scripts agent to write and run a PowerShell script", orchestrator);
         Assert.Contains("same language as the user's request", system);

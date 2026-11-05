@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -17,6 +18,14 @@ public sealed class ScriptTools(IChatClient model, string dataFolder, string ses
     private sealed record Script(string Path, string Language, string Hash, string Summary);
 
     private readonly Dictionary<string, Script> _scripts = [];
+
+    internal Func<bool> IsElevated { get; init; } = ScriptHostLaunch.IsElevated;
+
+    internal Action<ProcessStartInfo> LaunchHost { get; init; } = ScriptHostLaunch.Start;
+
+    internal Func<string> HostPath { get; init; } = ScriptHostLaunch.Resolve;
+
+    internal TimeSpan HostTimeout { get; init; } = TimeSpan.FromSeconds(120);
 
     private string Workspace => Path.Combine(dataFolder, "work", session);
 
@@ -137,16 +146,21 @@ new ChatMessage(ChatRole.System,
 
     [Tool("script_run",
           "scripts",
-          "Execute a previously created script after approval of its full code. Refuses modified scripts. Runs in its workspace with a 120-second timeout. Successful completion preserves child processes; Stop, timeout, or failure terminates the job. Exit code 0 confirms only script completion, not an open application window. Use dedicated launch tools for applications and management consoles. No automatic undo.",
+          "Execute a previously created script after approval of its full code. Refuses modified scripts. Set elevated true only for a change that needs administrator rights; Windows asks for approval through UAC. Runs in its workspace with a 120-second timeout. Successful completion preserves child processes; Stop, timeout, or failure terminates the job. Exit code 0 confirms only script completion, not an open application window. Use dedicated launch tools for applications and management consoles. No automatic undo.",
           RiskLevel.Danger,
           policyDriven: true,
           timeoutSeconds: 120)]
-    public async Task<string> Run(string id, CancellationToken cancellationToken)
+    public async Task<string> Run(string id, CancellationToken cancellationToken, bool elevated = false)
     {
         var script = Get(id);
         if (script.Language == "powershell")
         {
             CheckPowerShellPolicy();
+        }
+
+        if (elevated && !IsElevated())
+        {
+            return await RunElevated(script, cancellationToken);
         }
 
         await Validate(script.Language, script.Path, cancellationToken);
@@ -186,9 +200,83 @@ new ChatMessage(ChatRole.System,
                                                 error);
         }
         await File.WriteAllTextAsync(outputPath, output, cancellationToken);
-        return $"Exit code 0. Output file: {outputPath}\n{output[..Math.Min(output.Length, 1500)]}"
+        return Success(outputPath, output);
+    }
+
+    private static string Success(string outputPath, string output) =>
+        $"Exit code 0. Output file: {outputPath}\n{output[..Math.Min(output.Length, 1500)]}"
             + "\nOnly script completion was verified. Child processes may continue running; "
             + "an application window was not verified. Verify the window before reporting an application as open.";
+
+    private async Task<string> RunElevated(Script script, CancellationToken token)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(HostTimeout);
+        token = timeout.Token;
+        // Each launch has its own completion files, including launches still waiting for UAC.
+        var exchange = Path.Combine(Workspace, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(exchange);
+        var output = Path.Combine(exchange, "output.txt");
+        var cancel = Path.Combine(exchange, "cancel");
+        var outputPath = Path.ChangeExtension(script.Path, ".out.txt");
+        void SignalCancel()
+        {
+            using var file = File.OpenHandle(cancel, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite);
+        }
+        using var registration = token.Register(SignalCancel);
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            var start = new ProcessStartInfo(HostPath()) { UseShellExecute = true, Verb = "runas" };
+            string[] arguments = ["--workspace", Workspace, "--script", script.Path,
+                "--language", script.Language, "--hash", script.Hash, "--output", output, "--cancel", cancel];
+            foreach (var argument in arguments)
+            {
+                start.ArgumentList.Add(argument);
+            }
+            if (script.Language == "python")
+            {
+                start.ArgumentList.Add("--python");
+                start.ArgumentList.Add(Python);
+            }
+            if (Hash(script.Path) != script.Hash)
+            {
+                throw new InvalidOperationException("The approved script was modified.");
+            }
+            token.ThrowIfCancellationRequested();
+            var launch = Task.Run(() => LaunchHost(start), CancellationToken.None);
+            // Observe a late launch failure even when cancellation stops the wait for UAC.
+            _ = launch.ContinueWith(task => { _ = task.Exception; }, CancellationToken.None,
+                                   TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            await launch.WaitAsync(token);
+            while (!File.Exists(output + ".status"))
+            {
+                await Task.Delay(100, token);
+            }
+            token.ThrowIfCancellationRequested();
+            var status = await File.ReadAllTextAsync(output + ".status", token);
+            var text = await File.ReadAllTextAsync(output, token);
+            await File.WriteAllTextAsync(outputPath, text, token);
+            token.ThrowIfCancellationRequested();
+            return status switch
+            {
+                "0" => Success(outputPath, text),
+                "1" => throw new InvalidOperationException($"Script failed. Output file: {outputPath}\n{text[..Math.Min(text.Length, 250)]}"),
+                "2" => throw new OperationCanceledException("Script stopped.", token),
+                "3" => throw new InvalidOperationException($"The elevated host rejected the script and did not run it. Output file: {outputPath}\n{text[..Math.Min(text.Length, 250)]}"),
+                _ => throw new InvalidOperationException("The elevated host returned an invalid status.")
+            };
+        }
+        catch (Win32Exception error) when (error.NativeErrorCode == 1223)
+        {
+            throw new InvalidOperationException("The user denied the administrator prompt. The script did not run.", error);
+        }
+        catch (OperationCanceledException)
+        {
+            SignalCancel();
+            await File.WriteAllTextAsync(outputPath, "Script stopped.", CancellationToken.None);
+            throw;
+        }
     }
 
     [Tool("python_ensure",
@@ -283,7 +371,10 @@ new ChatMessage(ChatRole.System,
             var script = Get(scriptId);
             return new(ApprovalOutcome.Ask,
                        false,
-                       $"Run {script.Language}: {script.Summary}. No undo. Review the complete code:\n{File.ReadAllText(script.Path)}");
+                       $"Run {script.Language}: {script.Summary}. "
+                       + (args.TryGetValue("elevated", out var elevated) && bool.TryParse(elevated?.ToString(), out var admin) && admin
+                           ? "Run with administrator rights. Windows will ask you to approve administrator rights. " : "")
+                       + $"No undo. Review the complete code:\n{File.ReadAllText(script.Path)}");
         }
         return new(ApprovalOutcome.Ask,
                    false,

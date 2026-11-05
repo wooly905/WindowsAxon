@@ -15,6 +15,7 @@
     <ProjectReference Include="..\..\src\WindowsAxon.Agent\WindowsAxon.Agent.csproj" />
     <ProjectReference Include="..\..\src\WindowsAxon.Windows\WindowsAxon.Windows.csproj" />
     <ProjectReference Include="..\..\src\WindowsAxon.Eval\WindowsAxon.Eval.csproj" />
+    <ProjectReference Include="..\..\src\WindowsAxon.ScriptHost\WindowsAxon.ScriptHost.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

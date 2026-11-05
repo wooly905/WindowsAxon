@@ -86,6 +86,7 @@ public static class SubAgentCatalog
             ["scripts"],
             [
                 "Create the script with script_create, then run it with script_run.",
+                "Set script_run elevated true only for a change that needs administrator rights. Windows asks the user to approve administrator rights through UAC. Ordinary scripts use elevated false. Scripts must never request elevation themselves. Use admin_tool_open for management consoles.",
                 "A script exit code of 0 confirms only script completion, not that an application opened.",
             ]),
     ];
