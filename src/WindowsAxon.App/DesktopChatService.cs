@@ -136,7 +136,8 @@ appTools,
                              string model,
                              string apiKey = "",
                              bool removeApiKey = false,
-                             EndpointApi? api = null)
+                             EndpointApi? api = null,
+                             string? endpointName = null)
     {
         ValidateEndpoint(baseUrl);
         if (string.IsNullOrWhiteSpace(model))
@@ -150,8 +151,14 @@ appTools,
         {
             throw new ArgumentException("The API key contains an invalid character.");
         }
-        var previousReference = Settings.ChatEndpoint.ApiKey;
-        var reference = !removeApiKey && new Uri(Settings.ChatEndpoint.BaseUrl.TrimEnd('/')) == new Uri(baseUrl)
+        var name = endpointName ?? Settings.Chat.Endpoint;
+        bool Matches(string key) => string.Equals(key, name, StringComparison.OrdinalIgnoreCase);
+        name = Settings.Endpoints.Keys.FirstOrDefault(Matches) ?? ProviderPresets.All.Keys.FirstOrDefault(Matches) ?? name;
+        var current = Settings.Endpoints.GetValueOrDefault(name)
+            ?? ProviderPresets.All.GetValueOrDefault(name)
+            ?? new EndpointSettings { BaseUrl = baseUrl };
+        var previousReference = current.ApiKey;
+        var reference = !removeApiKey && new Uri(current.BaseUrl.TrimEnd('/')) == new Uri(baseUrl)
             ? previousReference : null;
         var newCredential = !removeApiKey && apiKey.Length > 0 ? $"WindowsAxon/desktop/{Guid.NewGuid():N}" : null;
         if (newCredential is not null)
@@ -165,11 +172,12 @@ appTools,
 
         var endpoints = new Dictionary<string, EndpointSettings>(Settings.Endpoints)
         {
-            [Settings.Chat.Endpoint] = Settings.ChatEndpoint with
+            [name] = current with
             {
                 BaseUrl = baseUrl,
                 ApiKey = reference,
-                Api = api ?? Settings.ChatEndpoint.Api,
+                Api = api ?? current.Api,
+                Models = current.Models.Contains(model.Trim()) ? current.Models : [.. current.Models, model.Trim()],
             },
         };
         var updated = Settings with
@@ -177,6 +185,7 @@ appTools,
             Endpoints = endpoints,
             Chat = Settings.Chat with
             {
+                Endpoint = name,
                 Model = model.Trim()
             },
         };

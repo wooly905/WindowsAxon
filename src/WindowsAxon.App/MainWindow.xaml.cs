@@ -61,7 +61,7 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         }
 
         InitializeComponent();
-        AppWindow.Resize(new global::Windows.Graphics.SizeInt32(460, 570));
+        AppWindow.Resize(new global::Windows.Graphics.SizeInt32(700, 900));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "WindowsAxon.ico"));
         if (Environment.ProcessPath is { } executable)
         {
@@ -298,18 +298,24 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
 
     private async void Settings_Click(object sender, RoutedEventArgs e)
     {
+        var endpoints = ProviderPresets.MergeWith(_service.Settings.Endpoints);
+        var provider = new ComboBox
+        {
+            Header = "Provider",
+            ItemsSource = endpoints.Keys.ToList(),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        EndpointSettings Selected() => endpoints[(string)provider.SelectedItem];
         var endpoint = new TextBox
         {
             Header = "Endpoint URL",
-            Text = _service.Settings.ChatEndpoint.BaseUrl,
             PlaceholderText = "http://localhost:11434/v1"
         };
-        var model = new TextBox { Header = "Model name", Text = _service.Settings.Chat.Model };
+        var model = new TextBox { Header = "Model name" };
         var api = new ComboBox
         {
             Header = "API",
             ItemsSource = Enum.GetValues<EndpointApi>(),
-            SelectedItem = _service.Settings.ChatEndpoint.Api,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         var apiKey = new PasswordBox
@@ -323,8 +329,8 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         void UpdateKeyStatus()
         {
             var sameEndpoint = Uri.TryCreate(endpoint.Text.Trim().TrimEnd('/'), UriKind.Absolute, out var uri)
-                && uri == new Uri(_service.Settings.ChatEndpoint.BaseUrl.TrimEnd('/'));
-            var hasKey = !string.IsNullOrEmpty(_service.Settings.ChatEndpoint.ApiKey);
+                && uri == new Uri(Selected().BaseUrl.TrimEnd('/'));
+            var hasKey = !string.IsNullOrEmpty(Selected().ApiKey);
             keyStatus.Text = hasKey && sameEndpoint
                 ? "An API key is configured. Leave blank to keep it, or enter a replacement."
                 : hasKey ? "The endpoint changed. Enter a key for this endpoint; the previous key will not be reused."
@@ -338,9 +344,23 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
             apiKey.IsEnabled = false;
         };
         removeKey.Unchecked += (_, _) => apiKey.IsEnabled = true;
-        UpdateKeyStatus();
+        provider.SelectionChanged += (_, _) =>
+        {
+            var selected = Selected();
+            var isCurrent = (string)provider.SelectedItem == _service.Settings.Chat.Endpoint;
+            endpoint.Text = selected.BaseUrl;
+            api.SelectedItem = selected.Api;
+            model.Text = isCurrent ? _service.Settings.Chat.Model : selected.Models.FirstOrDefault() ?? "";
+            apiKey.Password = "";
+            removeKey.IsChecked = false;
+            UpdateKeyStatus();
+        };
+        provider.SelectedItem = endpoints.Keys.First(name => string.Equals(name,
+                                                                           _service.Settings.Chat.Endpoint,
+                                                                           StringComparison.OrdinalIgnoreCase));
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
         var content = new StackPanel { Spacing = 12 };
+        content.Children.Add(provider);
         content.Children.Add(endpoint);
         content.Children.Add(api);
         content.Children.Add(model);
@@ -359,6 +379,16 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
             TextWrapping = TextWrapping.Wrap,
             IsTextSelectionEnabled = true
         });
+        content.Children.Add(new TextBlock { Text = "Get an API key:" });
+        foreach (var (name, url) in new[]
+                 {
+                     ("Nvidia", "https://build.nvidia.com/settings/api-keys"),
+                     ("Google", "https://aistudio.google.com/apikey"),
+                     ("Groq", "https://console.groq.com/keys"),
+                 })
+        {
+            content.Children.Add(new HyperlinkButton { Content = $"{name}: {url}", NavigateUri = new Uri(url), Padding = new Thickness(0) });
+        }
         content.Children.Add(error);
         var dialog = new ContentDialog
         {
@@ -377,7 +407,8 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
                                       model.Text,
                                       apiKey.Password,
                                       removeKey.IsChecked == true,
-                                      (EndpointApi)api.SelectedItem);
+                                      (EndpointApi)api.SelectedItem,
+                                      (string)provider.SelectedItem);
                 ViewModel.SettingsChanged();
             }
             catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)

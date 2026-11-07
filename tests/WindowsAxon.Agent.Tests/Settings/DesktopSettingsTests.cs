@@ -69,6 +69,31 @@ public sealed class DesktopSettingsTests : IDisposable
     }
 
     [Fact(Skip = "Windows Credential Manager requires Windows.", SkipUnless = nameof(IsWindows))]
+    public void Switching_provider_keeps_each_provider_key_and_models()
+    {
+        using var service = CreateService();
+        service.SaveSettings("https://api.example.com/v1", "auto", "test-first");
+        var first = TrackKey(service);
+        var groq = ProviderPresets.All["Groq"].BaseUrl;
+
+        service.SaveSettings(groq, "openai/gpt-oss-20b", "test-groq", endpointName: "groq");
+        var second = TrackKey(service);
+        service.SaveSettings(groq, "custom-model", endpointName: "Groq");
+
+        Assert.Equal("Groq", service.Settings.Chat.Endpoint);
+        Assert.Equal($"credential:{second}", service.Settings.ChatEndpoint.ApiKey);
+        Assert.Contains("custom-model", service.Settings.ChatEndpoint.Models);
+        Assert.Contains("qwen/qwen3.8-27b", service.Settings.ChatEndpoint.Models);
+        Assert.Equal($"credential:{first}", service.Settings.Endpoints["local"].ApiKey);
+        Assert.Equal("test-first", _secrets.Read(first));
+
+        using var reloaded = CreateService();
+        reloaded.LoadSettings();
+        Assert.Equal(service.Settings.ChatEndpoint.Models, reloaded.Settings.ChatEndpoint.Models);
+        Assert.Equal("custom-model", reloaded.Settings.Chat.Model);
+    }
+
+    [Fact(Skip = "Windows Credential Manager requires Windows.", SkipUnless = nameof(IsWindows))]
     public void Replacement_saves_the_new_key_and_deletes_the_old_managed_key()
     {
         using var service = CreateService();
