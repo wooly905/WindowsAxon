@@ -26,6 +26,20 @@
             <Style TargetType="TextBlock">
                 <Setter Property="FontSize" Value="{ThemeResource ControlContentThemeFontSize}" />
             </Style>
+            <Style x:Key="ComposerButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Width" Value="36" />
+                <Setter Property="Height" Value="36" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="CornerRadius" Value="18" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+            </Style>
+            <Style x:Key="ComposerAccentButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+                <Setter Property="Width" Value="36" />
+                <Setter Property="Height" Value="36" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="CornerRadius" Value="18" />
+            </Style>
             <Style TargetType="ContentDialog" BasedOn="{StaticResource DefaultContentDialogStyle}">
                 <Setter Property="TitleTemplate">
                     <Setter.Value>

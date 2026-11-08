@@ -28,6 +28,7 @@
     <Compile Include="..\..\src\WindowsAxon.App\WindowsWindowTools.cs" Link="Desktop\WindowsWindowTools.cs" />
     <Compile Include="..\..\src\WindowsAxon.App\DesktopWindow.cs" Link="Desktop\DesktopWindow.cs" />
     <Compile Include="..\..\src\WindowsAxon.App\WindowInfo.cs" Link="Desktop\WindowInfo.cs" />
+    <Compile Include="..\..\src\WindowsAxon.App\ConversationStore.cs" Link="Desktop\ConversationStore.cs" />
     <Compile Include="..\..\src\WindowsAxon.App\Updates\*.cs" Link="Desktop\Updates\%(Filename)%(Extension)" />
     <!-- Host rules are compiled in; tests never start the elevated host executable. -->
     <Compile Include="..\..\src\WindowsAxon.ScriptHost\HostRequest.cs" Link="ScriptHost\HostRequest.cs" />

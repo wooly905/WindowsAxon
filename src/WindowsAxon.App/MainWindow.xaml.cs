@@ -7,6 +7,7 @@ using WindowsAxon.App.Updates;
 using Microsoft.Extensions.AI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Input;
 using Windows.System;
 using Windows.UI.Core;
@@ -43,7 +44,7 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
             settingsError = "Could not load settings. Open Settings to configure the model.";
         }
 
-        ViewModel = new ChatViewModel(_service);
+        ViewModel = new ChatViewModel(_service, new ConversationStore(ConversationStore.DefaultFolder));
         _service.EmergencyStopRequested += () => DispatcherQueue.TryEnqueue(() => ViewModel.SendCommand.Cancel());
         _service.InputActiveChanged += active => DispatcherQueue.TryEnqueue(() => InputBanner.Visibility = active ? Visibility.Visible : Visibility.Collapsed);
         _service.ToolStarted += tool => DispatcherQueue.TryEnqueue(() => ViewModel.ShowTool(tool));
@@ -61,7 +62,12 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         }
 
         InitializeComponent();
-        AppWindow.Resize(new global::Windows.Graphics.SizeInt32(700, 900));
+        ConversationList.ItemsSource = new CollectionViewSource
+        {
+            IsSourceGrouped = true,
+            Source = ViewModel.ConversationGroups,
+        }.View;
+        AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1000, 900));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "WindowsAxon.ico"));
         if (Environment.ProcessPath is { } executable)
         {
@@ -80,6 +86,10 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
     }
 
     public Visibility ReplyVisibility(bool awaitingReply) => awaitingReply ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility BusyVisibility(bool isBusy) => isBusy ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility IdleVisibility(bool isBusy) => isBusy ? Visibility.Collapsed : Visibility.Visible;
 
     private static Version CurrentVersion => typeof(MainWindow).Assembly.GetName().Version ?? new Version(0, 0, 0);
 
@@ -199,6 +209,42 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
                                    () =>
             ConversationScroll.ChangeView(null, ConversationScroll.ScrollableHeight, null, disableAnimation: true));
 
+    private void ConversationList_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is ConversationSummary summary)
+        {
+            ViewModel.OpenConversation(summary.Id);
+        }
+    }
+
+    private void DeleteConversation_Click(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).Tag is string id)
+        {
+            ViewModel.DeleteConversation(id);
+        }
+    }
+
+    private async void Attach_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new Microsoft.Windows.Storage.Pickers.FileOpenPicker(AppWindow.Id);
+        picker.FileTypeFilter.Add("*");
+        var file = await picker.PickSingleFileAsync();
+        if (file is not null)
+        {
+            InsertInput($"\"{file.Path}\"");
+        }
+    }
+
+    private void InsertInput(string text)
+    {
+        var start = Math.Min(CommandInput.SelectionStart, CommandInput.Text.Length);
+        var before = start > 0 && !char.IsWhiteSpace(CommandInput.Text[start - 1]) ? " " : "";
+        CommandInput.Text = CommandInput.Text.Insert(start, before + text);
+        CommandInput.SelectionStart = start + before.Length + text.Length;
+        CommandInput.Focus(FocusState.Programmatic);
+    }
+
     private void CommandInput_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
         var shift = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
@@ -226,6 +272,13 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
                                            decision.AllowForConversation ? "Allow for this conversation" : "",
                                            "Deny",
                                            cancellationToken);
+        ViewModel.AddEvent(result switch
+        {
+            ContentDialogResult.Primary => $"Allowed {call.Name}",
+            ContentDialogResult.Secondary => $"Allowed {call.Name} for this conversation",
+            _ => $"Denied {call.Name}",
+        });
+
         return result switch
         {
             ContentDialogResult.Primary => ApprovalAnswer.Allow,

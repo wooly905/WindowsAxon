@@ -4,71 +4,158 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:WindowsAxon.App"
     Title="WindowsAxon">
-    <Grid x:Name="Root" Padding="16" RowSpacing="12">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
-        <Grid ColumnSpacing="12">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-            <StackPanel>
-                <TextBlock Text="WindowsAxon" Style="{StaticResource TitleTextBlockStyle}" FontSize="24" />
-                <TextBlock Text="Enter what you want to do in Windows." Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            </StackPanel>
-            <Button Grid.Column="1" Content="New chat" Command="{x:Bind ViewModel.NewChatCommand}" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" VerticalAlignment="Center" />
-            <Button Grid.Column="2" Content="Settings" Click="Settings_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" VerticalAlignment="Center" />
-        </Grid>
-        <StackPanel Grid.Row="1" Spacing="8">
-            <InfoBar x:Name="UpdateBar" IsOpen="False" IsClosable="False" Severity="Informational" Title="Update available">
-                <InfoBar.Content>
-                    <StackPanel x:Name="UpdateActions" Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
-                        <Button Content="Update" Click="UpdateNow_Click" Style="{StaticResource AccentButtonStyle}" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" />
-                        <Button Content="Skip" Click="SkipUpdate_Click" />
-                    </StackPanel>
-                </InfoBar.Content>
-            </InfoBar>
-            <TextBlock x:Name="InputBanner" Visibility="Collapsed" Text="WindowsAxon is using the mouse and keyboard — press Ctrl+Alt+Q to stop." TextWrapping="Wrap" />
-        </StackPanel>
-        <ScrollViewer x:Name="ConversationScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-            <ItemsControl ItemsSource="{x:Bind ViewModel.Messages}" FontSize="{ThemeResource ControlContentThemeFontSize}" SizeChanged="ConversationContent_SizeChanged">
-                <ItemsControl.ItemTemplate>
+    <Grid x:Name="Root">
+        <Grid.Resources>
+            <local:ChatTemplateSelector x:Key="ChatTemplates">
+                <local:ChatTemplateSelector.Message>
                     <DataTemplate>
-                        <Border Background="{Binding Background}" BorderBrush="{Binding BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="{Binding Margin}" HorizontalAlignment="{Binding Alignment}">
+                        <Border Background="{Binding Background}" BorderBrush="{Binding BorderBrush}" BorderThickness="{Binding BorderThickness}" CornerRadius="16" Padding="14,10" Margin="{Binding Margin}" HorizontalAlignment="{Binding Alignment}">
                             <StackPanel Spacing="4">
-                                <TextBlock Text="{Binding Speaker}" FontWeight="SemiBold" Foreground="{Binding Foreground}" />
+                                <TextBlock Text="{Binding Speaker}" Visibility="{Binding SpeakerVisibility}" FontWeight="SemiBold" Foreground="{Binding Foreground}" />
                                 <local:MarkdownMessage Text="{Binding Text}" IsMarkdown="{Binding IsMarkdown}" FontSize="{ThemeResource ControlContentThemeFontSize}" Foreground="{Binding Foreground}" HorizontalContentAlignment="Stretch" />
                             </StackPanel>
                         </Border>
                     </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </ScrollViewer>
-        <Border x:Name="PromptPanel" Grid.Row="3" Visibility="Collapsed" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="16">
-            <StackPanel Spacing="12">
-                <TextBlock x:Name="PromptTitle" FontWeight="SemiBold" TextWrapping="Wrap" />
-                <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
-                    <TextBlock x:Name="PromptText" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
-                </ScrollViewer>
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button x:Name="PromptPrimary" Tag="Primary" Click="Prompt_Click" />
-                    <Button x:Name="PromptSecondary" Tag="Secondary" Click="Prompt_Click" />
-                    <Button x:Name="PromptClose" Tag="None" Click="Prompt_Click" />
-                </StackPanel>
-            </StackPanel>
-        </Border>
-        <StackPanel Grid.Row="4" Spacing="8">
-            <Button Content="Start a new request instead" Command="{x:Bind ViewModel.StartNewRequestCommand}" Visibility="{x:Bind ReplyVisibility(ViewModel.AwaitingReply), Mode=OneWay}" />
-            <TextBox x:Name="CommandInput" Text="{x:Bind ViewModel.Input, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="For example: open Paint" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="66" MaxHeight="135" BorderThickness="1" BorderBrush="{ThemeResource ControlStrongStrokeColorDefaultBrush}" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" PreviewKeyDown="CommandInput_PreviewKeyDown" AutomationProperties.Name="Command text" />
-            <Grid ColumnSpacing="12">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                <ProgressRing IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" Width="18" Height="18" />
-                <TextBlock Grid.Column="1" Text="{x:Bind ViewModel.Status, Mode=OneWay}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
-                <Button Grid.Column="2" Content="Stop" Command="{x:Bind ViewModel.SendCancelCommand}" />
-                <Button Grid.Column="3" Content="Send" Command="{x:Bind ViewModel.SendCommand}" Style="{StaticResource AccentButtonStyle}" />
+                </local:ChatTemplateSelector.Message>
+                <local:ChatTemplateSelector.Event>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center" Margin="0,0,0,10">
+                            <FontIcon Glyph="&#xE90F;" FontSize="11" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                            <TextBlock Text="{Binding Text}" FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </local:ChatTemplateSelector.Event>
+                <local:ChatTemplateSelector.Divider>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding Text}" FontSize="11" HorizontalAlignment="Center" Margin="0,6,0,12" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    </DataTemplate>
+                </local:ChatTemplateSelector.Divider>
+            </local:ChatTemplateSelector>
+        </Grid.Resources>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="260" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid Background="{ThemeResource LayerFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,0,1,0" Padding="8,16,8,12" RowSpacing="8">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Grid Padding="8,0,0,0">
+                <TextBlock Text="WindowsAxon" Style="{StaticResource SubtitleTextBlockStyle}" VerticalAlignment="Center" />
+                <Button HorizontalAlignment="Right" Command="{x:Bind ViewModel.NewChatCommand}" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" CornerRadius="16" Width="32" Height="32" Padding="0" ToolTipService.ToolTip="New chat" AutomationProperties.Name="New chat">
+                    <FontIcon Glyph="&#xE710;" FontSize="14" />
+                </Button>
             </Grid>
-        </StackPanel>
+            <ListView x:Name="ConversationList" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True" ItemClick="ConversationList_ItemClick" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" AutomationProperties.Name="Conversations">
+                <ListView.GroupStyle>
+                    <GroupStyle>
+                        <GroupStyle.HeaderTemplate>
+                            <DataTemplate x:DataType="local:ConversationGroup">
+                                <TextBlock Text="{x:Bind Key}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </DataTemplate>
+                        </GroupStyle.HeaderTemplate>
+                    </GroupStyle>
+                </ListView.GroupStyle>
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:ConversationSummary">
+                        <StackPanel Padding="0,6" Background="Transparent">
+                            <StackPanel.ContextFlyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem Text="Delete" Tag="{x:Bind Id}" Click="DeleteConversation_Click">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xE74D;" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                </MenuFlyout>
+                            </StackPanel.ContextFlyout>
+                            <TextBlock Text="{x:Bind Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{x:Bind Preview}" FontSize="11" TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+            <Button Grid.Row="2" Click="Settings_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" AutomationProperties.Name="Settings">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <FontIcon Glyph="&#xE713;" FontSize="14" />
+                    <TextBlock Text="Settings" />
+                </StackPanel>
+            </Button>
+        </Grid>
+        <Grid Grid.Column="1" Padding="16" RowSpacing="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <StackPanel Spacing="8">
+                <TextBlock Text="Enter what you want to do in Windows." Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+                <InfoBar x:Name="UpdateBar" IsOpen="False" IsClosable="False" Severity="Informational" Title="Update available">
+                    <InfoBar.Content>
+                        <StackPanel x:Name="UpdateActions" Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
+                            <Button Content="Update" Click="UpdateNow_Click" Style="{StaticResource AccentButtonStyle}" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" />
+                            <Button Content="Skip" Click="SkipUpdate_Click" />
+                        </StackPanel>
+                    </InfoBar.Content>
+                </InfoBar>
+                <TextBlock x:Name="InputBanner" Visibility="Collapsed" Text="WindowsAxon is using the mouse and keyboard — press Ctrl+Alt+Q to stop." TextWrapping="Wrap" />
+            </StackPanel>
+            <ScrollViewer x:Name="ConversationScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{x:Bind ViewModel.Messages}" ItemTemplateSelector="{StaticResource ChatTemplates}" FontSize="{ThemeResource ControlContentThemeFontSize}" SizeChanged="ConversationContent_SizeChanged" />
+            </ScrollViewer>
+            <Border x:Name="PromptPanel" Grid.Row="2" Visibility="Collapsed" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="16">
+                <StackPanel Spacing="12">
+                    <TextBlock x:Name="PromptTitle" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                        <TextBlock x:Name="PromptText" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                    </ScrollViewer>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button x:Name="PromptPrimary" Tag="Primary" Click="Prompt_Click" />
+                        <Button x:Name="PromptSecondary" Tag="Secondary" Click="Prompt_Click" />
+                        <Button x:Name="PromptClose" Tag="None" Click="Prompt_Click" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+            <StackPanel Grid.Row="3" Spacing="8">
+                <Button Content="Start a new request instead" Command="{x:Bind ViewModel.StartNewRequestCommand}" Visibility="{x:Bind ReplyVisibility(ViewModel.AwaitingReply), Mode=OneWay}" />
+                <Border Background="{ThemeResource ControlFillColorDefaultBrush}" BorderBrush="{ThemeResource ControlStrongStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="24" Padding="6">
+                    <Grid ColumnSpacing="4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="AttachButton" Click="Attach_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" Style="{StaticResource ComposerButtonStyle}" VerticalAlignment="Bottom" ToolTipService.ToolTip="Insert a file path" AutomationProperties.Name="Insert a file path">
+                            <FontIcon Glyph="&#xE710;" FontSize="14" />
+                        </Button>
+                        <TextBox x:Name="CommandInput" Grid.Column="1" Text="{x:Bind ViewModel.Input, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="For example: open Paint" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="135" BorderThickness="0" Background="Transparent" VerticalAlignment="Center" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" PreviewKeyDown="CommandInput_PreviewKeyDown" AutomationProperties.Name="Command text">
+                            <TextBox.Resources>
+                                <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="Transparent" />
+                                <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                            </TextBox.Resources>
+                        </TextBox>
+                        <Button Grid.Column="2" Command="{x:Bind ViewModel.SendCancelCommand}" Visibility="{x:Bind BusyVisibility(ViewModel.IsBusy), Mode=OneWay}" Style="{StaticResource ComposerButtonStyle}" VerticalAlignment="Bottom" ToolTipService.ToolTip="Stop" AutomationProperties.Name="Stop">
+                            <FontIcon Glyph="&#xE71A;" FontSize="14" />
+                        </Button>
+                        <Button Grid.Column="3" Command="{x:Bind ViewModel.SendCommand}" Visibility="{x:Bind IdleVisibility(ViewModel.IsBusy), Mode=OneWay}" Style="{StaticResource ComposerAccentButtonStyle}" VerticalAlignment="Bottom" ToolTipService.ToolTip="Send" AutomationProperties.Name="Send">
+                            <FontIcon Glyph="&#xE724;" FontSize="14" />
+                        </Button>
+                    </Grid>
+                </Border>
+                <Grid ColumnSpacing="8" Padding="12,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <ProgressRing IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" Width="14" Height="14" />
+                    <TextBlock Grid.Column="1" Text="{x:Bind ViewModel.Status, Mode=OneWay}" TextWrapping="Wrap" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                </Grid>
+            </StackPanel>
+        </Grid>
     </Grid>
 </Window>

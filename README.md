@@ -39,7 +39,11 @@ The app is unpackaged and includes its Windows App SDK runtime, so launching it 
 - **Stop** cancels the active request, including a pending approval or step-limit card.
 - **Ctrl+Alt+Q** stops mouse and keyboard input. Input also stops when another window becomes active.
 - Reply to a clarification in the input box, or select **Start a new request instead**.
-- **New chat** creates a new conversation and clears conversation-level approvals.
+- **New chat** (**+** at the top of the sidebar) creates a new conversation and clears conversation-level approvals.
+- The sidebar lists saved conversations, grouped by date. Select one to view it. Right-click one and select **Delete** to remove it. A reopened conversation starts a new agent session; earlier messages are not sent to the model.
+- Conversations are saved to `%LOCALAPPDATA%\WindowsAxon\conversations`. These files contain your requests and the replies, including text from tool results.
+- The conversation shows each tool call and approval decision as a small line between messages, with a time line before a new group of messages.
+- **+** in the input box selects a file and inserts its path. WindowsAxon does not read the file until a request uses it.
 - **Settings** changes the endpoint URL, model name, and optional API key, then starts a new conversation. Leave the key field blank to keep the configured key for the same endpoint, enter a replacement, or select **Remove saved API key**. Changing the endpoint requires entering its key again.
 
 WindowsAxon replies display Markdown headings, bold and italic text, strikethrough, lists, task lists, quotes, tables, links, and code blocks. Text remains selectable, and wide tables can scroll horizontally. User messages and errors remain plain text. HTML is displayed as text; images appear as labels and links without automatic downloads. Mermaid code blocks currently display their source rather than a diagram.
