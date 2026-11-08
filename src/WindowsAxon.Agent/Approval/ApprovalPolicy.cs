@@ -20,12 +20,13 @@ public sealed class ApprovalPolicy(ToolCatalog catalog, IEnumerable<IApprovalRul
             return AskEachTime;
         }
 
-        if (autoApprove)
+        var rule = _rules.FirstOrDefault(r => r.AppliesTo(call.Name));
+        if (autoApprove && rule?.AlwaysAsks(call) != true)
         {
             return Auto;
         }
 
-        var decision = _rules.FirstOrDefault(r => r.AppliesTo(call.Name))?.Decide(call)
+        var decision = rule?.Decide(call)
             ?? new ApprovalDecision(ApprovalOutcome.Ask, entry.Risk == RiskLevel.Change, null);
 
         return decision is { Outcome: ApprovalOutcome.Ask, AllowForConversation: true } && _allowed.Contains(call.Name)

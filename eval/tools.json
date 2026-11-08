@@ -273,6 +273,9 @@
       "properties": {
         "id": {
           "type": "string"
+        },
+        "elevated": {
+          "type": "boolean"
         }
       },
       "required": [

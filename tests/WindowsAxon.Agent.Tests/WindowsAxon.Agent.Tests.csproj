@@ -28,5 +28,9 @@
     <Compile Include="..\..\src\WindowsAxon.App\DesktopWindow.cs" Link="Desktop\DesktopWindow.cs" />
     <Compile Include="..\..\src\WindowsAxon.App\WindowInfo.cs" Link="Desktop\WindowInfo.cs" />
     <Compile Include="..\..\src\WindowsAxon.App\Updates\*.cs" Link="Desktop\Updates\%(Filename)%(Extension)" />
+    <!-- Host rules are compiled in; tests never start the elevated host executable. -->
+    <Compile Include="..\..\src\WindowsAxon.ScriptHost\HostRequest.cs" Link="ScriptHost\HostRequest.cs" />
+    <Compile Include="..\..\src\WindowsAxon.ScriptHost\ScriptRunner.cs" Link="ScriptHost\ScriptRunner.cs" />
+    <Compile Include="..\..\src\WindowsAxon.ScriptHost\ProcessJob.cs" Link="ScriptHost\ProcessJob.cs" />
   </ItemGroup>
 </Project>

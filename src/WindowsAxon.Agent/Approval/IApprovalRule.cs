@@ -8,4 +8,7 @@ public interface IApprovalRule
     bool AppliesTo(string toolName);
 
     ApprovalDecision Decide(FunctionCallContent call);
+
+    /// <summary>True when this call must show the approval card even if AutoApproveTools is on.</summary>
+    bool AlwaysAsks(FunctionCallContent call) => false;
 }

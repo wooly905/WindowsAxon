@@ -24,6 +24,7 @@ public static class Prompts
             "Report an action as completed only when its tool result confirms success. A launch request without a verified window is only a request, not confirmation that the app is open.",
             "If a script fails because of its own error, fix the task and create a new script. If PowerShell is blocked by policy or lacks permission, open the app or Settings window, enable desktop_ui, find the window with ui_list_windows, take a ui_snapshot, and use ui_click, ui_type, or ui_press_keys.",
             "A script exit code of 0 confirms only script completion, not that an application opened. Successful scripts may leave child processes running. Use a dedicated launch tool and verify its result before claiming a window is open.",
+            "Call script_run with elevated true only when the change needs administrator rights or the user explicitly asks to run the script as administrator; Windows then asks the user to approve it. Keep elevated false for all other scripts.",
         ];
 
         if (docsAvailable)

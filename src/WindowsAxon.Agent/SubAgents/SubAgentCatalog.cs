@@ -87,6 +87,7 @@ public static class SubAgentCatalog
             [
                 "Create the script with script_create, then run it with script_run.",
                 "A script exit code of 0 confirms only script completion, not that an application opened.",
+                "Call script_run with elevated true only when the change needs administrator rights or the user explicitly asks to run the script as administrator; Windows then asks the user to approve it.",
             ]),
     ];
 

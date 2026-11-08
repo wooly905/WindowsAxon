@@ -23,7 +23,7 @@ public sealed class EnableToolsFunction : AIFunction
         ["browser"] = "show and control a web page in Chrome or Edge when the user asks to open a site or work in a page",
         ["web"] = "search and read public web pages in a hidden browser; no window is shown",
         ["desktop_ui"] = "control an open app or Settings window (ui_snapshot, ui_click, ui_type, ui_press_keys); draw in Paint. Use when the user asks to work in a window or when a PowerShell script fails or cannot do the task",
-        ["scripts"] = "write and run a PowerShell or Python script (script_create, script_run) to read or change the system when no dedicated tool can do the task",
+        ["scripts"] = "write and run a PowerShell or Python script (script_create, script_run) to read or change the system when no dedicated tool can do the task; script_run elevated true only for an administrator change or when the user explicitly asks to run as administrator, which Windows asks the user to approve",
         ["utilities"] = "calculator, clipboard, undo changes",
         ["docs"] = "fetch a learn.microsoft.com article and search official Microsoft code samples",
     };

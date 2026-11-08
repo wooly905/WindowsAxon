@@ -23,6 +23,8 @@
     <PackageReference Include="Markdig" />
     <ProjectReference Include="..\WindowsAxon.Agent\WindowsAxon.Agent.csproj" />
     <ProjectReference Include="..\WindowsAxon.Windows\WindowsAxon.Windows.csproj" />
+    <!-- Build order only; the elevated host must never load in the app process. -->
+    <ProjectReference Include="..\WindowsAxon.ScriptHost\WindowsAxon.ScriptHost.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Assets\WindowsAxon.ico" CopyToOutputDirectory="PreserveNewest" />
@@ -31,6 +33,27 @@
   <Target Name="ExcludePlaywrightFromResourceIndex" BeforeTargets="_GenerateProjectPriConfigurationFiles">
     <ItemGroup>
       <_AppxLayoutAssetPackageFiles Include="@(PackagingOutputs)" Condition="'%(PackagingOutputs.NuGetPackageId)' == 'Microsoft.Playwright' or $([System.String]::Copy('%(PackagingOutputs.TargetPath)').StartsWith('.playwright'))" />
+    </ItemGroup>
+  </Target>
+  <!-- dotnet run: place the framework-dependent host beside the app. -->
+  <Target Name="CopyScriptHost" AfterTargets="Build" Condition="'$(PublishSingleFile)' != 'true'">
+    <MSBuild Projects="..\WindowsAxon.ScriptHost\WindowsAxon.ScriptHost.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="_ScriptHostTarget" />
+    </MSBuild>
+    <ItemGroup>
+      <_ScriptHostFiles Include="%(_ScriptHostTarget.RootDir)%(_ScriptHostTarget.Directory)WindowsAxon.ScriptHost.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ScriptHostFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+  <!-- The release is one file, so embed a self-contained single-file host; the app extracts it at run time. -->
+  <Target Name="EmbedScriptHost" BeforeTargets="AssignTargetPaths" Condition="'$(PublishSingleFile)' == 'true'">
+    <PropertyGroup>
+      <_ScriptHostPublishDir>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)scripthost\'))</_ScriptHostPublishDir>
+    </PropertyGroup>
+    <MSBuild Projects="..\WindowsAxon.ScriptHost\WindowsAxon.ScriptHost.csproj" Targets="Restore" Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishTrimmed=true;MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
+    <MSBuild Projects="..\WindowsAxon.ScriptHost\WindowsAxon.ScriptHost.csproj" Targets="Publish" Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishSingleFile=true;PublishTrimmed=true;EnableCompressionInSingleFile=true;DebugType=none;PublishDir=$(_ScriptHostPublishDir)" />
+    <ItemGroup>
+      <EmbeddedResource Include="$(_ScriptHostPublishDir)WindowsAxon.ScriptHost.exe" LogicalName="WindowsAxon.ScriptHost.exe" />
     </ItemGroup>
   </Target>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />

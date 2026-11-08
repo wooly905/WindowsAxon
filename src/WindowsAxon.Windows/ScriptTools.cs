@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -17,6 +18,8 @@ public sealed class ScriptTools(IChatClient model, string dataFolder, string ses
     private sealed record Script(string Path, string Language, string Hash, string Summary);
 
     private readonly Dictionary<string, Script> _scripts = [];
+
+    internal ScriptElevation Elevation { get; init; } = ScriptElevation.Default(dataFolder);
 
     private string Workspace => Path.Combine(dataFolder, "work", session);
 
@@ -137,11 +140,11 @@ new ChatMessage(ChatRole.System,
 
     [Tool("script_run",
           "scripts",
-          "Execute a previously created script after approval of its full code. Refuses modified scripts. Runs in its workspace with a 120-second timeout. Successful completion preserves child processes; Stop, timeout, or failure terminates the job. Exit code 0 confirms only script completion, not an open application window. Use dedicated launch tools for applications and management consoles. No automatic undo.",
+          "Execute a previously created script after approval of its full code. Refuses modified scripts. Runs in its workspace with a 120-second timeout. Successful completion preserves child processes; Stop, timeout, or failure terminates the job. Exit code 0 confirms only script completion, not an open application window. Use dedicated launch tools for applications and management consoles. No automatic undo. Set elevated true only when the change needs administrator rights or the user explicitly asks to run the script as administrator; Windows then asks the user to approve WindowsAxon Script Host.",
           RiskLevel.Danger,
           policyDriven: true,
           timeoutSeconds: 120)]
-    public async Task<string> Run(string id, CancellationToken cancellationToken)
+    public async Task<string> Run(string id, CancellationToken cancellationToken, bool elevated = false)
     {
         var script = Get(id);
         if (script.Language == "powershell")
@@ -157,6 +160,11 @@ new ChatMessage(ChatRole.System,
         }
 
         var outputPath = Path.ChangeExtension(script.Path, ".out.txt");
+        if (elevated && !Elevation.IsElevated())
+        {
+            return await RunElevated(script, outputPath, cancellationToken);
+        }
+
         string output;
         try
         {
@@ -186,9 +194,112 @@ new ChatMessage(ChatRole.System,
                                                 error);
         }
         await File.WriteAllTextAsync(outputPath, output, cancellationToken);
-        return $"Exit code 0. Output file: {outputPath}\n{output[..Math.Min(output.Length, 1500)]}"
+        return Completed(outputPath, output);
+    }
+
+    private static string Completed(string outputPath, string output) =>
+        $"Exit code 0. Output file: {outputPath}\n{output[..Math.Min(output.Length, 1500)]}"
             + "\nOnly script completion was verified. Child processes may continue running; "
             + "an application window was not verified. Verify the window before reporting an application as open.";
+
+    // The elevated host may not give back a usable process handle, so the status file signals completion
+    // and the cancel file carries Stop and timeout.
+    private async Task<string> RunElevated(Script script, string outputPath, CancellationToken cancellationToken)
+    {
+        var statusPath = outputPath + ".status";
+        var cancelPath = Path.ChangeExtension(script.Path, $".{Guid.NewGuid():N}.cancel");
+        File.Delete(statusPath);
+        var start = new ProcessStartInfo(Elevation.ResolveHost())
+        {
+            UseShellExecute = true,
+            Verb = "runas"
+        };
+        foreach (var argument in new[]
+                 {
+                     "--workspace", Workspace,
+                     "--script", script.Path,
+                     "--language", script.Language,
+                     "--hash", script.Hash,
+                     "--output", outputPath,
+                     "--cancel", cancelPath,
+                     "--user-data", dataFolder
+                 })
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        if (script.Language == "python")
+        {
+            start.ArgumentList.Add("--python");
+            start.ArgumentList.Add(Python);
+        }
+
+        var launch = Task.Run(() => Elevation.Launch(start), CancellationToken.None);
+        Process? host = null;
+        try
+        {
+            host = await launch.WaitAsync(cancellationToken);
+            while (!File.Exists(statusPath))
+            {
+                // A host that exits without a status file rejected its arguments before trusting any output path.
+                if (HasExited(host) && !File.Exists(statusPath))
+                {
+                    throw new InvalidOperationException("The elevated script host rejected the script and did not run it.");
+                }
+
+                await Task.Delay(250, cancellationToken);
+            }
+        }
+        catch (Win32Exception error) when (error.NativeErrorCode == 1223)
+        {
+            throw new UnauthorizedAccessException("The user denied the Windows administrator prompt. The script did not run.");
+        }
+        catch (OperationCanceledException)
+        {
+            // Stop and timeout must reach the host even while the UAC prompt is still open.
+            await File.WriteAllTextAsync(cancelPath, "", CancellationToken.None);
+            _ = launch.ContinueWith(task =>
+                                    {
+                                        if (task.IsCompletedSuccessfully)
+                                        {
+                                            task.Result?.Dispose();
+                                        }
+                                        else
+                                        {
+                                            _ = task.Exception;
+                                        }
+                                    },
+                                    TaskScheduler.Default);
+            throw;
+        }
+        finally
+        {
+            host?.Dispose();
+        }
+
+        var status = (await File.ReadAllTextAsync(statusPath, CancellationToken.None)).Trim();
+        var output = File.Exists(outputPath) ? await File.ReadAllTextAsync(outputPath, CancellationToken.None) : "";
+        var excerpt = output[..Math.Min(output.Length, 250)];
+        return status switch
+        {
+            "0" => Completed(outputPath, output),
+            "1" => throw new InvalidOperationException($"Script failed. Output file: {outputPath}\n{excerpt}"),
+            "2" => throw new OperationCanceledException("The elevated script was stopped or timed out."),
+            _ => throw new InvalidOperationException($"The elevated script host rejected the script and did not run it. {excerpt}")
+        };
+    }
+
+    private static bool HasExited(Process? process)
+    {
+        try
+        {
+            return process?.HasExited == true;
+        }
+        catch (Exception error) when (error is InvalidOperationException or Win32Exception)
+        {
+            // Without access to the elevated process, rely on the status file alone.
+            return false;
+        }
     }
 
     [Tool("python_ensure",
@@ -274,6 +385,20 @@ new ChatMessage(ChatRole.System,
 
     public bool AppliesTo(string toolName) => toolName is "script_run" or "python_ensure" or "python_install_package";
 
+    // UAC can be configured to elevate without prompting, so the card is the only approval that is always shown.
+    public bool AlwaysAsks(FunctionCallContent call) => call.Name == "script_run" && IsElevated(call);
+
+    private static bool IsElevated(FunctionCallContent call) =>
+        call.Arguments is { } args
+        && args.TryGetValue("elevated", out var value)
+        && value switch
+        {
+            bool flag => flag,
+            JsonElement { ValueKind: JsonValueKind.True } => true,
+            string text => bool.TryParse(text, out var parsed) && parsed,
+            _ => false
+        };
+
     public ApprovalDecision Decide(FunctionCallContent call)
     {
         if (call.Name == "script_run" && call.Arguments is { } args && args.TryGetValue("id", out var id)
@@ -283,7 +408,9 @@ new ChatMessage(ChatRole.System,
             var script = Get(scriptId);
             return new(ApprovalOutcome.Ask,
                        false,
-                       $"Run {script.Language}: {script.Summary}. No undo. Review the complete code:\n{File.ReadAllText(script.Path)}");
+                       IsElevated(call)
+                           ? $"Run {script.Language} with administrator rights: {script.Summary}. Windows will ask the user to approve administrator rights for WindowsAxon Script Host, unless UAC is set to elevate without prompting. No undo. Review the complete code:\n{File.ReadAllText(script.Path)}"
+                           : $"Run {script.Language}: {script.Summary}. No undo. Review the complete code:\n{File.ReadAllText(script.Path)}");
         }
         return new(ApprovalOutcome.Ask,
                    false,
