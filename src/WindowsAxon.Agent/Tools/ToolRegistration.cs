@@ -33,9 +33,27 @@ public static class ToolRegistration
     {
         protected override async ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
         {
-            using CancellationTokenRegistration stop = cancel is null ? default : cancellationToken.Register(cancel);
+            var canceled = 0;
+            void CancelOnce()
+            {
+                if (Interlocked.Exchange(ref canceled, 1) == 0)
+                {
+                    cancel?.Invoke();
+                }
+            }
 
-            return await Task.Run(async () => await base.InvokeCoreAsync(arguments, cancellationToken), cancellationToken);
+            try
+            {
+                using CancellationTokenRegistration stop = cancel is null ? default : cancellationToken.Register(CancelOnce);
+
+                return await Task.Run(async () => await base.InvokeCoreAsync(arguments, cancellationToken), cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // The call can finish and dispose the registration before its callback runs.
+                CancelOnce();
+                throw;
+            }
         }
     }
 }
