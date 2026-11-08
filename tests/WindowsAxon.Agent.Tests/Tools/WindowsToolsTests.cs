@@ -283,22 +283,34 @@ public sealed class WindowsToolsTests : IAsyncDisposable
     }
 
     [Fact]
-    public void Screenshot_is_scaled_to_the_maximum_side()
+    public async Task Screenshot_is_scaled_to_the_maximum_side()
     {
-        var source = System.Windows.Media.Imaging.BitmapSource.Create(2560,
-                                                                      1440,
-                                                                      96,
-                                                                      96,
-                                                                      System.Windows.Media.PixelFormats.Bgra32,
-                                                                      null,
-                                                                      new byte[2560 * 1440 * 4],
-                                                                      2560 * 4);
-
-        var image = ScreenshotTools.Encode(source);
+        var image = await ScreenshotTools.Encode(new byte[2560 * 1440 * 4], 2560, 1440);
 
         Assert.Equal((1280, 720), (image.Width, image.Height));
         Assert.Equal([0x89, 0x50, 0x4E, 0x47], image.Png[..4]);
+        // IHDR stores the encoded width and height as big-endian integers at bytes 16-23.
+        Assert.Equal(1280, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(image.Png.AsSpan(16, 4)));
+        Assert.Equal(720, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(image.Png.AsSpan(20, 4)));
     }
+
+    [Fact]
+    public async Task Ui_automation_elements_remain_usable_after_their_creating_thread_exits()
+    {
+        var root = await ApartmentThread.Run(ApartmentState.MTA, () => Uia.FromHandle(GetDesktopWindow()));
+        // Let the creating STA thread exit and finalize before the element is used elsewhere.
+        await Task.Delay(500, TestContext.Current.CancellationToken);
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+
+        var child = await ApartmentThread.Run(ApartmentState.MTA, () => root.FindFirst(TreeScope.Children, Uia.TrueCondition));
+
+        Assert.NotNull(child);
+        Assert.NotNull(await ApartmentThread.Run(ApartmentState.MTA, () => child.Name));
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint GetDesktopWindow();
 
     [Fact]
     public void Every_paint_action_requires_approval_each_time()

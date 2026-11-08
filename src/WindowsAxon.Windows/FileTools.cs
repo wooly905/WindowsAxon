@@ -228,7 +228,7 @@ public sealed class FileTools(UndoJournal journal, string session) : IUndoRestor
           RiskLevel.Danger)]
     public Task<string> Delete(string path)
     {
-        return StaThread.Run(() =>
+        return ApartmentThread.Run(() =>
         {
             path = Path.GetFullPath(path);
             if (Path.GetPathRoot(path) == path)

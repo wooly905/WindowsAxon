@@ -1,10 +1,7 @@
 using System.Diagnostics;
-using System.Windows;
-using System.Windows.Automation;
 using WindowsAxon.Agent.Approval;
 using WindowsAxon.Agent.Tools;
 using Microsoft.Extensions.AI;
-using AutomationCondition = System.Windows.Automation.Condition;
 
 namespace WindowsAxon.Windows;
 
@@ -16,10 +13,10 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
                                                                     false,
                                                                     "Paint changes require approval for each action. Check the selected image before allowing.");
 
-    private AutomationElement Paint(string windowId)
+    private UiaElement Paint(string windowId)
     {
         var root = ui.Root(windowId);
-        using var process = Process.GetProcessById(root.Current.ProcessId);
+        using var process = Process.GetProcessById(root.ProcessId);
         if (!process.ProcessName.Equals("mspaint", StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException("Select a Paint window from ui_list_windows.");
@@ -28,58 +25,48 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
         return root;
     }
 
-    private static AutomationElement Control(AutomationElement root,
+    private static UiaElement Control(UiaElement root,
                                              string name,
                                              string? automationId = null,
                                              ControlType? type = null)
     {
-        AutomationCondition condition = new PropertyCondition(AutomationElement.NameProperty, name);
+        var condition = Uia.Name(name);
         if (automationId is not null)
         {
-            condition = new OrCondition(new PropertyCondition(AutomationElement.AutomationIdProperty, automationId),
-                                        condition);
+            condition = Uia.Or(Uia.AutomationId(automationId), condition);
         }
 
-        AutomationCondition typeCondition = type is null
-            ? AutomationCondition.TrueCondition
-            : new PropertyCondition(AutomationElement.ControlTypeProperty, type);
-        var filter = type is null ? condition : new AndCondition(condition, typeCondition);
+        var typeCondition = type is null ? Uia.TrueCondition : Uia.Type(type.Value);
+        var filter = type is null ? condition : Uia.And(condition, typeCondition);
         return root.FindFirst(TreeScope.Descendants, filter)
             ?? root.FindAll(TreeScope.Descendants, typeCondition)
-            .Cast<AutomationElement>()
-            .FirstOrDefault(element => element.Current.Name.TrimEnd(':')
+            .FirstOrDefault(element => element.Name.TrimEnd(':')
                 .Equals(name.TrimEnd(':'),
                     StringComparison.OrdinalIgnoreCase)
-                || element.Current.Name.StartsWith(name.TrimEnd(':') + ":", StringComparison.OrdinalIgnoreCase))
-            ?? throw new NotSupportedException($"Paint control '{name}' is not available in '{root.Current.Name}'. Available editable controls: {string.Join(", ", root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit))
-            .Cast<AutomationElement>()
-            .Select(element => element.Current.Name + " [" + element.Current.AutomationId + "]"))}.");
+                || element.Name.StartsWith(name.TrimEnd(':') + ":", StringComparison.OrdinalIgnoreCase))
+            ?? throw new NotSupportedException($"Paint control '{name}' is not available in '{root.Name}'. Available editable controls: {string.Join(", ", root.FindAll(TreeScope.Descendants, Uia.Type(ControlType.Edit))
+            .Select(element => element.Name + " [" + element.AutomationId + "]"))}.");
     }
 
-    private static void Activate(AutomationElement element)
+    private static void Activate(UiaElement element)
     {
-        if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
-        {
-            ((InvokePattern)invoke).Invoke();
-        }
-        else if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var selection))
-        {
-            ((SelectionItemPattern)selection).Select();
-        }
-        else if (element.TryGetCurrentPattern(TogglePattern.Pattern, out var toggle))
-        {
-            ((TogglePattern)toggle).Toggle();
-        }
-        else
+        if (!element.TryInvoke() && !element.TrySelect() && !element.TryToggle())
         {
             throw new NotSupportedException("Paint control does not expose an activation pattern.");
         }
     }
 
-    private static Rect Canvas(AutomationElement root)
+    private static void SetValue(UiaElement element, string value)
     {
-        var canvas = Control(root, "Canvas", "image").Current.BoundingRectangle;
-        var window = root.Current.BoundingRectangle;
+        var pattern = element.ValuePatternOrNull()
+            ?? throw new NotSupportedException("Paint control does not support ValuePattern.");
+        Uia.Call(() => pattern.SetValue(value));
+    }
+
+    private static ScreenRect Canvas(UiaElement root)
+    {
+        var canvas = Control(root, "Canvas", "image").BoundingRectangle;
+        var window = root.BoundingRectangle;
         if (canvas.IsEmpty || canvas.Width <= 0 || canvas.Height <= 0 || !window.Contains(canvas))
         {
             throw new InvalidOperationException("The whole Paint canvas must be visible. Use Fit to window before drawing.");
@@ -88,11 +75,13 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
         return canvas;
     }
 
-    private static void Style(AutomationElement root, string? color, int? size)
+    private static void Style(UiaElement root, string? color, int? size)
     {
         if (color is not null)
         {
-            Activate(Control(root, color, type: ControlType.ListItem));
+            var palette = Control(root, "Colors", type: ControlType.Group).FindAll(TreeScope.Descendants, Uia.Type(ControlType.ListItem));
+            Activate(palette.FirstOrDefault(swatch => swatch.Name.Equals(color, StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentException($"Paint has no palette color '{color}'. Use one of: {string.Join(", ", palette.Select(swatch => swatch.Name))}."));
         }
 
         if (size is not null)
@@ -102,28 +91,51 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
                 throw new ArgumentException("Brush size must be 1-100.");
             }
 
-            AutomationElement slider = Control(root, "Size", type: ControlType.Slider);
-
-            if (!slider.TryGetCurrentPattern(RangeValuePattern.Pattern, out var value))
+            // Pencil and brushes show a size slider; shapes offer fixed outline sizes in a drop-down instead.
+            if (root.FindFirst(TreeScope.Descendants, Uia.And(Uia.Name("Size"), Uia.Type(ControlType.Slider))) is not { } slider)
             {
-                throw new NotSupportedException("Brush size control does not support RangeValuePattern.");
+                ShapeSize(root, size.Value);
+                return;
             }
 
-            var range = (RangeValuePattern)value;
-            if (size < range.Current.Minimum || size > range.Current.Maximum)
+            var range = slider.RangeValuePatternOrNull()
+                ?? throw new NotSupportedException("Brush size control does not support RangeValuePattern.");
+            if (size < Uia.Call(() => range.CurrentMinimum) || size > Uia.Call(() => range.CurrentMaximum))
             {
                 throw new ArgumentException("Requested size is outside Paint's supported range.");
             }
 
-            range.SetValue(size.Value);
+            Uia.Call(() => range.SetValue(size.Value));
         }
     }
 
-    private static void WaitForTool(AutomationElement root, string tool)
+    private static void ShapeSize(UiaElement root, int size)
+    {
+        var button = Control(root, "Size", type: ControlType.Button);
+        if (!button.TryExpand())
+        {
+            Activate(button);
+        }
+
+        Thread.Sleep(300);
+        var options = root.FindAll(TreeScope.Descendants, Uia.Type(ControlType.MenuItem))
+            .Where(item => item.AutomationId.StartsWith("Size", StringComparison.Ordinal))
+            .ToList();
+        var option = options.FirstOrDefault(item => item.AutomationId == "Size" + size);
+        if (option is null)
+        {
+            button.TryCollapse();
+            throw new ArgumentException($"Shape outline size must be one of: {string.Join(", ", options.Select(item => item.AutomationId[4..]))}.");
+        }
+
+        Activate(option);
+    }
+
+    private static void WaitForTool(UiaElement root, string tool)
     {
         for (int attempt = 0; attempt < 20; attempt++)
         {
-            if (Control(root, "Canvas", "image").Current.Name.Contains(tool, StringComparison.OrdinalIgnoreCase))
+            if (Control(root, "Canvas", "image").Name.Contains(tool, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
@@ -142,7 +154,7 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
                             int? height = null,
                             CancellationToken cancellationToken = default)
     {
-        return StaThread.Run(() =>
+        return ApartmentThread.Run(ApartmentState.MTA, () =>
         {
             if (width is < 1 or > 10000 || height is < 1 or > 10000)
             {
@@ -155,14 +167,11 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
                      input => input.Shortcut("Ctrl+N",
                                              cancellationToken));
             Thread.Sleep(300);
-            if (root.FindAll(TreeScope.Descendants,
-                             new PropertyCondition(AutomationElement.ControlTypeProperty,
-                                                   ControlType.Window))
-                .Cast<AutomationElement>()
-                .Any(window => window.Current.Name.Contains("save your work",
-                                                            StringComparison.OrdinalIgnoreCase)
-                    || window.Current.Name.Contains("save changes",
-                                                    StringComparison.OrdinalIgnoreCase)))
+            if (root.FindAll(TreeScope.Descendants, Uia.Type(ControlType.Window))
+                .Any(window => window.Name.Contains("save your work",
+                                                    StringComparison.OrdinalIgnoreCase)
+                    || window.Name.Contains("save changes",
+                                            StringComparison.OrdinalIgnoreCase)))
             {
                 throw new InvalidOperationException("Paint is waiting for a save prompt. The image has not been replaced. Respond in Paint before continuing.");
             }
@@ -177,20 +186,12 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
                 var dialog = root;
                 if (width is not null)
                 {
-                    ((ValuePattern)Control(dialog,
-                                           "Width",
-                                           "WidthTextBox",
-                                           ControlType.Edit)
-                        .GetCurrentPattern(ValuePattern.Pattern)).SetValue(width.ToString()!);
+                    SetValue(Control(dialog, "Width", "WidthTextBox", ControlType.Edit), width.Value.ToString());
                 }
 
                 if (height is not null)
                 {
-                    ((ValuePattern)Control(dialog,
-                                           "Height",
-                                           "HeightTextBox",
-                                           ControlType.Edit)
-                        .GetCurrentPattern(ValuePattern.Pattern)).SetValue(height.ToString()!);
+                    SetValue(Control(dialog, "Height", "HeightTextBox", ControlType.Edit), height.Value.ToString());
                 }
 
                 Activate(Control(dialog, "OK", type: ControlType.Button));
@@ -202,7 +203,7 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
 
     [Tool("paint_draw_shape",
           "desktop_ui",
-          "Draw line, rectangle, oval, circle, triangle, or arrow on a fully visible Paint canvas. Points use 0-1000 coordinates. Optional English palette color and brush size. Ctrl+Alt+Q stops input.",
+          "Draw line, rectangle, oval, circle, triangle, or arrow on a fully visible Paint canvas. Points use 0-1000 coordinates. Optional English palette color and outline size (Paint offers 1, 3, 5, or 8). Ctrl+Alt+Q stops input.",
           RiskLevel.Change)]
     public Task<string> Shape(string windowId,
                               string shape,
@@ -214,7 +215,7 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
                               int? size = null,
                               CancellationToken cancellationToken = default)
     {
-        return StaThread.Run(() =>
+        return ApartmentThread.Run(ApartmentState.MTA, () =>
         {
             var name = shape switch
             {
@@ -265,7 +266,7 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
                              int? size = null,
                              CancellationToken cancellationToken = default)
     {
-        return StaThread.Run(() =>
+        return ApartmentThread.Run(ApartmentState.MTA, () =>
         {
             if (points.Length is < 2 or > 500 || points.Any(point => point.Length != 2))
             {
@@ -280,8 +281,8 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
             ui.Input(windowId,
                      cancellationToken,
                      input => input.Drag(canvas,
-                                         points.Select(point => new Point(point[0],
-                                                                          point[1])).ToArray(),
+                                         points.Select(point => new ScreenPoint(point[0],
+                                                                                point[1])).ToArray(),
                                          cancellationToken));
             return "Freehand input sent to Paint. The rendered pixels have not been verified.";
         });
@@ -297,7 +298,7 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
                              double y,
                              CancellationToken cancellationToken = default)
     {
-        return StaThread.Run(() =>
+        return ApartmentThread.Run(ApartmentState.MTA, () =>
         {
             var root = Paint(windowId);
             Activate(Control(root, "Text", type: ControlType.Button));
@@ -323,7 +324,7 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
           RiskLevel.Change)]
     public Task<string> Save(string windowId, string path, CancellationToken cancellationToken)
     {
-        return StaThread.Run(() =>
+        return ApartmentThread.Run(ApartmentState.MTA, () =>
         {
             path = Path.GetFullPath(path);
             if (File.Exists(path))
@@ -356,32 +357,39 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
                      input => input.Shortcut("Ctrl+Shift+S",
                                              cancellationToken));
             Thread.Sleep(500);
-            var dialog = root.FindAll(TreeScope.Descendants,
-                                      new PropertyCondition(AutomationElement.ControlTypeProperty,
-                                                            ControlType.Window))
-                .Cast<AutomationElement>()
+            var dialog = root.FindAll(TreeScope.Descendants, Uia.Type(ControlType.Window))
                 .FirstOrDefault(window => window.FindFirst(TreeScope.Descendants,
-                                                           new PropertyCondition(AutomationElement.AutomationIdProperty,
-                                                                                 "FileTypeControlHost")) is not null)
+                                                           Uia.AutomationId("FileTypeControlHost")) is not null)
                 ?? throw new InvalidOperationException("Save As dialog not found. Check Paint for a prompt.");
             var combo = Control(dialog,
                                 "Save as type:",
                                 "FileTypeControlHost",
                                 ControlType.ComboBox);
-            var option = combo.FindAll(TreeScope.Descendants,
-                                       new PropertyCondition(AutomationElement.ControlTypeProperty,
-                                                             ControlType.ListItem))
-                .Cast<AutomationElement>()
-                .FirstOrDefault(element => element.Current.Name.StartsWith(format + " ",
-                                                                           StringComparison.OrdinalIgnoreCase))
-                ?? throw new NotSupportedException("Paint does not offer the requested file format.");
-            ((SelectionItemPattern)option.GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
+            // Native UIA exposes a collapsed combo box's list items only after it expands.
+            combo.TryExpand();
+            try
+            {
+                var option = combo.FindAll(TreeScope.Descendants, Uia.Type(ControlType.ListItem))
+                    .FirstOrDefault(element => element.Name.StartsWith(format + " ",
+                                                                       StringComparison.OrdinalIgnoreCase))
+                    ?? throw new NotSupportedException("Paint does not offer the requested file format.");
+                if (!option.TrySelect())
+                {
+                    throw new NotSupportedException("Paint file format option does not support selection.");
+                }
+            }
+            finally
+            {
+                combo.TryCollapse();
+            }
+
             Thread.Sleep(300);
             var fileName = Control(dialog,
                                    "File name:",
                                    "1001",
                                    ControlType.Edit);
-            var fileNameValue = (ValuePattern)fileName.GetCurrentPattern(ValuePattern.Pattern);
+            var fileNameValue = fileName.ValuePatternOrNull()
+                ?? throw new NotSupportedException("Paint file name control does not support ValuePattern.");
             ui.DialogInput(windowId,
                            dialog,
                            cancellationToken,
@@ -394,8 +402,8 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
                                           cancellationToken);
                            });
             Thread.Sleep(200);
-            if (!fileNameValue.Current.Value.Equals(path,
-                                                    StringComparison.OrdinalIgnoreCase))
+            if (!Uia.Call(() => fileNameValue.CurrentValue).Equals(path,
+                                                                    StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("Paint did not retain the requested output path.");
             }

@@ -1,7 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
-    <UseWPF>true</UseWPF>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.22000.0</TargetPlatformMinVersion>
+    <!-- The Windows SDK runtime pack has RID "any", which makes Playwright copy node for every OS. -->
+    <PlaywrightPlatform>win-x64</PlaywrightPlatform>
   </PropertyGroup>
   <ItemGroup>
     <Using Include="System.IO" />
@@ -12,7 +14,8 @@
     <ProjectReference Include="..\WindowsAxon.Agent\WindowsAxon.Agent.csproj" />
     <PackageReference Include="Microsoft.Playwright" />
     <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="System.Diagnostics.EventLog" />
     <PackageReference Include="System.Management" />
-    <PackageReference Include="NAudio" />
+    <PackageReference Include="NAudio.Wasapi" />
   </ItemGroup>
 </Project>

@@ -1,10 +1,8 @@
 using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Interop;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using Microsoft.Extensions.AI;
 using WindowsAxon.Agent.Tools;
+using Windows.Graphics.Imaging;
+using Windows.Storage.Streams;
 
 namespace WindowsAxon.Windows;
 
@@ -16,12 +14,12 @@ public sealed class ScreenshotTools(DesktopUiTools ui)
           "desktop_ui",
           "Capture an image of one window ID from ui_list_windows, scaled to at most 1280 pixels. Use it when ui_snapshot cannot show the content, such as a canvas or a custom-drawn app, or to check a visual result. Blocks security, credential, remote-desktop, password-manager, and WindowsAxon windows. Remote endpoints require approval.",
           policyDriven: true)]
-    public Task<IEnumerable<AIContent>> Capture(string windowId)
+    public async Task<IEnumerable<AIContent>> Capture(string windowId)
     {
-        return StaThread.Run<IEnumerable<AIContent>>(() =>
+        var (title, pixels, width, height) = await ApartmentThread.Run(ApartmentState.MTA, () =>
         {
             var root = ui.Root(windowId);
-            var handle = new nint(root.Current.NativeWindowHandle);
+            var handle = root.NativeWindowHandle;
             if (IsIconic(handle))
             {
                 throw new InvalidOperationException("The window is minimized. Use ui_focus_window first.");
@@ -32,16 +30,19 @@ public sealed class ScreenshotTools(DesktopUiTools ui)
                 throw new InvalidOperationException("The window has no visible area.");
             }
 
-            var image = Encode(CaptureWindow(handle, rect.Right - rect.Left, rect.Bottom - rect.Top));
-            return
-            [
-                new TextContent($"Screenshot of \"{root.Current.Name}\", {image.Width}x{image.Height} pixels, attached as an image."),
-                new DataContent(image.Png, "image/png"),
-            ];
+            var size = (Width: rect.Right - rect.Left, Height: rect.Bottom - rect.Top);
+            return (root.Name, CaptureWindow(handle, size.Width, size.Height), size.Width, size.Height);
         });
+
+        var image = await Encode(pixels, width, height);
+        return
+        [
+            new TextContent($"Screenshot of \"{title}\", {image.Width}x{image.Height} pixels, attached as an image."),
+            new DataContent(image.Png, "image/png"),
+        ];
     }
 
-    private static BitmapSource CaptureWindow(nint handle, int width, int height)
+    private static byte[] CaptureWindow(nint handle, int width, int height)
     {
         var screen = GetDC(0);
         var memory = CreateCompatibleDC(screen);
@@ -57,9 +58,22 @@ public sealed class ScreenshotTools(DesktopUiTools ui)
                 throw new InvalidOperationException("Windows could not capture this window.");
             }
 
-            var source = Imaging.CreateBitmapSourceFromHBitmap(bitmap, 0, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
-            source.Freeze();
-            return source;
+            // A negative height requests top-down rows of 32-bit BGRA pixels.
+            var header = new BitmapInfoHeader
+            {
+                Size = 40,
+                Width = width,
+                Height = -height,
+                Planes = 1,
+                BitCount = 32,
+            };
+            var pixels = new byte[width * height * 4];
+            if (GetDIBits(memory, bitmap, 0, (uint)height, pixels, ref header, 0) != height)
+            {
+                throw new InvalidOperationException("Windows could not read the captured pixels.");
+            }
+
+            return pixels;
         }
         finally
         {
@@ -69,17 +83,59 @@ public sealed class ScreenshotTools(DesktopUiTools ui)
         }
     }
 
-    internal static (byte[] Png, int Width, int Height) Encode(BitmapSource source)
+    internal static async Task<(byte[] Png, int Width, int Height)> Encode(byte[] bgra, int width, int height)
     {
-        var scale = Math.Min(1.0, (double)MaxSide / Math.Max(source.PixelWidth, source.PixelHeight));
-        BitmapSource scaled = scale < 1 ? new TransformedBitmap(source, new ScaleTransform(scale, scale)) : source;
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(scaled));
-        using var stream = new MemoryStream();
-        encoder.Save(stream);
-        return (stream.ToArray(), scaled.PixelWidth, scaled.PixelHeight);
+        var scale = Math.Min(1.0, (double)MaxSide / Math.Max(width, height));
+        var scaledWidth = Math.Max(1, (int)Math.Round(width * scale));
+        var scaledHeight = Math.Max(1, (int)Math.Round(height * scale));
+        using var stream = new InMemoryRandomAccessStream();
+        var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
+        // GDI leaves the alpha byte undefined, so the encoder must ignore it.
+        encoder.SetPixelData(BitmapPixelFormat.Bgra8,
+                             BitmapAlphaMode.Ignore,
+                             (uint)width,
+                             (uint)height,
+                             96,
+                             96,
+                             bgra);
+        if (scale < 1)
+        {
+            encoder.BitmapTransform.ScaledWidth = (uint)scaledWidth;
+            encoder.BitmapTransform.ScaledHeight = (uint)scaledHeight;
+            encoder.BitmapTransform.InterpolationMode = BitmapInterpolationMode.Fant;
+        }
+
+        await encoder.FlushAsync();
+        var png = new byte[stream.Size];
+        using (var reader = new DataReader(stream.GetInputStreamAt(0)))
+        {
+            await reader.LoadAsync((uint)stream.Size);
+            reader.ReadBytes(png);
+        }
+
+        return (png, scaledWidth, scaledHeight);
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BitmapInfoHeader
+    {
+        public uint Size;
+        public int Width;
+        public int Height;
+        public ushort Planes;
+        public ushort BitCount;
+        public uint Compression;
+        public uint SizeImage;
+        public int XPelsPerMeter;
+        public int YPelsPerMeter;
+        public uint ClrUsed;
+        public uint ClrImportant;
+
+        // BITMAPINFO color table space; 32-bit BI_RGB does not use it, but GetDIBits may write up to three masks.
+        public uint Color0;
+        public uint Color1;
+        public uint Color2;
+    }
     [StructLayout(LayoutKind.Sequential)]
     private struct WindowRect
     {
@@ -118,4 +174,7 @@ public sealed class ScreenshotTools(DesktopUiTools ui)
 
     [DllImport("gdi32.dll")]
     private static extern bool DeleteDC(nint dc);
+
+    [DllImport("gdi32.dll")]
+    private static extern int GetDIBits(nint dc, nint bitmap, uint start, uint lines, byte[] bits, ref BitmapInfoHeader info, uint usage);
 }

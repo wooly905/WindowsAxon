@@ -1,7 +1,5 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Automation;
 
 namespace WindowsAxon.Windows;
 
@@ -29,11 +27,10 @@ public static class UiSafety
         }
     }
 
-    public static void CheckElement(AutomationElement element)
+    internal static void CheckElement(UiaElement element)
     {
-        var current = element.Current;
-        if (current.IsPassword
-            || System.Text.RegularExpressions.Regex.IsMatch(current.Name + " " + current.AutomationId,
+        if (element.IsPassword
+            || System.Text.RegularExpressions.Regex.IsMatch(element.Name + " " + element.AutomationId,
                                                             @"password|passcode|one.?time|verification.?code|security.?code|\botp\b|credit.?card|card.?number|\bcvv\b|\bcvc\b",
                                                             System.Text.RegularExpressions.RegexOptions.IgnoreCase))
         {
@@ -234,7 +231,7 @@ internal sealed class DesktopInput : IDisposable
         _ => throw new ArgumentException("Unsupported shortcut key."),
     };
 
-    public void Drag(Rect bounds, IReadOnlyList<Point> points, CancellationToken token)
+    public void Drag(ScreenRect bounds, IReadOnlyList<ScreenPoint> points, CancellationToken token)
     {
         if (points.Count < 2)
         {
@@ -247,7 +244,7 @@ internal sealed class DesktopInput : IDisposable
             throw new ArgumentException("Coordinates must be 0-1000.");
         }
 
-        void Move(Point point)
+        void Move(ScreenPoint point)
         {
             Check(token);
             if (point.X is < 0 or > 1000 || point.Y is < 0 or > 1000)

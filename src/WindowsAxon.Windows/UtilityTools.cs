@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Windows;
 using System.Runtime.InteropServices;
 using WindowsAxon.Agent.Tools;
 using WindowsAxon.Agent.Approval;
@@ -7,12 +6,16 @@ using Microsoft.Extensions.AI;
 
 namespace WindowsAxon.Windows;
 
-internal static class StaThread
+internal static class ApartmentThread
 {
-    public static Task<T> Run<T>(Func<T> action)
+    public static Task<T> Run<T>(Func<T> action) => Run(ApartmentState.STA, action);
+
+    // Clipboard APIs require STA; a thread-pool thread cannot guarantee that apartment state.
+    // UI Automation objects must live in the MTA: each call runs on a new thread, and STA-bound
+    // objects reach later threads only as proxies, which UIA rejects with E_INVALIDARG.
+    public static Task<T> Run<T>(ApartmentState apartment, Func<T> action)
     {
         var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        // Clipboard APIs require an STA thread; a thread-pool thread cannot guarantee that apartment state.
         var thread = new Thread(() =>
         {
             var dpi = SetThreadDpiAwarenessContext(new nint(-4));
@@ -35,7 +38,7 @@ internal static class StaThread
         {
             IsBackground = true
         };
-        thread.SetApartmentState(ApartmentState.STA);
+        thread.SetApartmentState(apartment);
         thread.Start();
         return completion.Task;
     }
@@ -56,7 +59,7 @@ public sealed class UtilityTools : IApprovalRule
           "utilities",
           "Read clipboard text. Always requires approval because the clipboard may contain sensitive information.",
           RiskLevel.Change)]
-    public Task<string> ClipboardGet() => StaThread.Run(() => Clipboard.ContainsText() ? Clipboard.GetText() : "No text on the clipboard.");
+    public Task<string> ClipboardGet() => ApartmentThread.Run(() => Win32Clipboard.GetText() ?? "No text on the clipboard.");
 
     [Tool("clipboard_set",
           "utilities",
@@ -64,9 +67,9 @@ public sealed class UtilityTools : IApprovalRule
           RiskLevel.Change)]
     public Task<string> ClipboardSet(string text)
     {
-        return StaThread.Run(() =>
+        return ApartmentThread.Run(() =>
         {
-            Clipboard.SetText(text);
+            Win32Clipboard.SetText(text);
             return "Clipboard text updated.";
         });
     }
