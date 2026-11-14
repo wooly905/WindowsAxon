@@ -37,10 +37,11 @@ public class FakeToolManifestTests
     }
 
     [Fact]
-    public void Every_skill_tool_exists_in_the_manifest()
+    public async Task Every_skill_tool_exists_in_the_manifest()
     {
         var names = FakeToolManifest.Load(RepoPaths.File("eval/tools.json")).Select(s => s.Name).ToHashSet();
-        var skills = WindowsAxon.Agent.Skills.SkillCatalog.Load([(RepoPaths.File("skills"), true)]);
+        var skills = await WindowsAxon.Agent.Skills.SkillCatalog.LoadAsync([(RepoPaths.File("skills"), true)],
+                                                                         cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(skills.Problems);
         Assert.All(skills.Skills.SelectMany(s => s.Tools), tool => Assert.Contains(tool, names));

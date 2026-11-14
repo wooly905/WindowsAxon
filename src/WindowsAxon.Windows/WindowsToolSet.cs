@@ -11,6 +11,9 @@ public sealed class WindowsToolSet : IDisposable
     private readonly WebTools _web;
     private readonly DocsTools _docs;
 
+    /// <summary>The personal skills folder in a data folder. New chats load skills from it.</summary>
+    public static string SkillsFolder(string dataFolder) => Path.Combine(dataFolder, "skills");
+
     public IReadOnlyList<IApprovalRule> ApprovalRules
     {
         get;
@@ -26,13 +29,14 @@ public sealed class WindowsToolSet : IDisposable
                           IEnumerable<string>? allowedPrivateHosts = null)
     {
         var journal = new UndoJournal(Path.Combine(dataFolder, "undo"), TimeProvider.System);
-        var files = new FileTools(journal, session);
+        var skills = SkillsFolder(dataFolder);
+        var files = new FileTools(journal, session, skills);
         var registry = new RegistryTools(journal, session);
         var settings = new SettingsTools(journal, session);
         var software = new SoftwareTools();
         var utilities = new UtilityTools();
         var ui = new DesktopUiTools(resolveWindow, emergencyStop, inputActive);
-        var paint = new PaintTools(ui);
+        var paint = new PaintTools(ui, skills);
         var scripts = new ScriptTools(model, dataFolder, session);
         _browser = new BrowserTools(dataFolder);
         _web = new WebTools(dataFolder, allowedPrivateHosts);

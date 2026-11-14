@@ -6,6 +6,7 @@ using WindowsAxon.Agent.Audit;
 using WindowsAxon.Agent.Guard;
 using WindowsAxon.Agent.Selection;
 using WindowsAxon.Agent.Settings;
+using WindowsAxon.Agent.Skills;
 using WindowsAxon.Agent.Steps;
 using WindowsAxon.Agent.SubAgents;
 using WindowsAxon.Agent.Tools;
@@ -55,16 +56,14 @@ public sealed class AgentFactory(AgentDependencies dependencies)
                                            selection));
         }
 
-        var skillsProvider = new AgentSkillsProvider(new CachingAgentSkillsSource(new DeduplicatingAgentSkillsSource(
-                new AgentFileSkillsSource(d.SkillRoots,
-                                          options: new AgentFileSkillsSourceOptions { AllowedScriptExtensions = [] }))),
-                                                     options: new AgentSkillsProviderOptions
+        // The catalog snapshot, so the skill list and content match the metadata.tools that ToolScopeChatClient uses.
+        var skillsProvider = new AgentSkillsProvider(d.Skills.AgentSkills,
+                                                     new AgentSkillsProviderOptions
                                                      {
                                                          DisableLoadSkillApproval = true,
                                                          DisableReadSkillResourceApproval = true,
                                                          SkillsInstructionPrompt = Prompts.SkillsInstruction,
-                                                     },
-                                                     ownsSource: true);
+                                                     });
 
         var agent = BuildChatClient(selection, steps, ledger, scopeTools: groups, fallbackPrompt)
             .AsAIAgent(new ChatClientAgentOptions

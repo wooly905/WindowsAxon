@@ -18,8 +18,8 @@ public sealed partial class SkillCatalog
             get; set;
         }
 
-        [YamlMember(Alias = "metadata")]
-        public Dictionary<string, string>? Metadata
+        [YamlMember(Alias = "compatibility")]
+        public string? Compatibility
         {
             get; set;
         }

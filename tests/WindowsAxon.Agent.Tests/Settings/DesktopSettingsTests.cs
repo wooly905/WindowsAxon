@@ -21,6 +21,17 @@ public sealed class DesktopSettingsTests : IDisposable
         Assert.Equal("baseUrl", error.ParamName);
     }
 
+    [Fact]
+    public void Skill_tool_names_include_the_app_window_and_shared_tools()
+    {
+        var names = DesktopChatService.ToolNames;
+
+        Assert.Contains("app_find", names);
+        Assert.Contains("ui_list_windows", names);
+        Assert.Contains("net_ping", names);
+        Assert.Same(names, DesktopChatService.ToolNames);
+    }
+
     private DesktopChatService CreateService(string? path = null) =>
         new(Substitute.For<IApprovalPrompter>(),
             Substitute.For<IStepLimitPrompter>(),

@@ -85,6 +85,16 @@ Thirty seconds after each launch, WindowsAxon asks the GitHub API for the latest
 
 Nothing is installed without selecting **Update**. If the network is unavailable or the GitHub API cannot be read, no message is shown.
 
+## Skills
+
+A skill is a folder with a `SKILL.md` file. The file has YAML frontmatter with `name`, `description`, and an optional `metadata.tools` list of existing tool names, followed by the instructions for the model. Built-in skills ship in `app-skills`. Personal skills are stored in `%LOCALAPPDATA%\WindowsAxon\skills`.
+
+Select **Skills** in the sidebar to create, edit, and delete personal skills. The editor sets the name, description, and instructions; it does not set `metadata.tools`, and an edit keeps the value that is already in the file. Built-in skills are read-only. Skill scripts never run.
+
+WindowsAxon loads skills once when a chat starts, so changes apply to new chats. A skill is not loaded when its frontmatter is invalid, its folder name differs from its name, `metadata.tools` names a tool that does not exist, or its name is already used. A built-in skill always wins over a personal skill with the same name, compared without case. The Skills dialog shows the reason for each skill that is not loaded. Saving uses the same checks and writes nothing when a check fails.
+
+With `ToolSelection` set to `SubAgents`, only the main agent loads skills. It writes the skill steps that a sub-agent needs into the delegated task.
+
 ## Tool catalog
 
 The operational catalog has 90 tools. `load_skill`, `read_skill_resource`, and `enable_tools` provide skill and group selection.

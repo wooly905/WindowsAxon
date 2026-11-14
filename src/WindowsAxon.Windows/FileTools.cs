@@ -6,7 +6,8 @@ using WindowsAxon.Agent.Undo;
 
 namespace WindowsAxon.Windows;
 
-public sealed class FileTools(UndoJournal journal, string session) : IUndoRestorer
+/// <param name="skillsFolder">The personal skills folder, which the tools must not change.</param>
+public sealed class FileTools(UndoJournal journal, string session, string? skillsFolder = null) : IUndoRestorer
 {
     public string Kind => "acl";
 
@@ -188,7 +189,7 @@ public sealed class FileTools(UndoJournal journal, string session) : IUndoRestor
           RiskLevel.Change)]
     public string Copy(string source, string destination)
     {
-        File.Copy(Path.GetFullPath(source), Path.GetFullPath(destination), false);
+        File.Copy(Path.GetFullPath(source), SkillsFolderGuard.Check(destination, skillsFolder), false);
         return "Copied file.";
     }
 
@@ -198,8 +199,8 @@ public sealed class FileTools(UndoJournal journal, string session) : IUndoRestor
           RiskLevel.Change)]
     public string Move(string source, string destination)
     {
-        source = Path.GetFullPath(source);
-        destination = Path.GetFullPath(destination);
+        source = SkillsFolderGuard.Check(source, skillsFolder);
+        destination = SkillsFolderGuard.Check(destination, skillsFolder);
         if (Directory.Exists(source))
         {
             Directory.Move(source, destination);
@@ -218,7 +219,7 @@ public sealed class FileTools(UndoJournal journal, string session) : IUndoRestor
           RiskLevel.Change)]
     public string Create(string path)
     {
-        Directory.CreateDirectory(Path.GetFullPath(path));
+        Directory.CreateDirectory(SkillsFolderGuard.Check(path, skillsFolder));
         return "Created directory.";
     }
 
@@ -230,7 +231,7 @@ public sealed class FileTools(UndoJournal journal, string session) : IUndoRestor
     {
         return ApartmentThread.Run(() =>
         {
-            path = Path.GetFullPath(path);
+            path = SkillsFolderGuard.Check(path, skillsFolder);
             if (Path.GetPathRoot(path) == path)
             {
                 throw new ArgumentException("A drive root cannot be deleted.");
@@ -268,7 +269,7 @@ public sealed class FileTools(UndoJournal journal, string session) : IUndoRestor
           RiskLevel.Danger)]
     public string AclSet(string path, string principal, string rights, bool inherit = false, bool remove = false)
     {
-        path = WritableAclPath(path);
+        path = WritableAclPath(SkillsFolderGuard.Check(path, skillsFolder));
         if (!new[] { "Read", "ReadAndExecute", "Modify", "FullControl" }.Contains(rights))
         {
             throw new ArgumentException("Unsupported rights.");

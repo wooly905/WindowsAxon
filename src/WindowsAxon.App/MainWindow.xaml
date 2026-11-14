@@ -76,12 +76,20 @@
                     </DataTemplate>
                 </ListView.ItemTemplate>
             </ListView>
-            <Button Grid.Row="2" Click="Settings_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" AutomationProperties.Name="Settings">
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                    <FontIcon Glyph="&#xE713;" FontSize="14" />
-                    <TextBlock Text="Settings" />
-                </StackPanel>
-            </Button>
+            <StackPanel Grid.Row="2">
+                <Button Click="Skills_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" AutomationProperties.Name="Skills">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <FontIcon Glyph="&#xE945;" FontSize="14" />
+                        <TextBlock Text="Skills" />
+                    </StackPanel>
+                </Button>
+                <Button Click="Settings_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" AutomationProperties.Name="Settings">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <FontIcon Glyph="&#xE713;" FontSize="14" />
+                        <TextBlock Text="Settings" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
         </Grid>
         <Grid Grid.Column="1" Padding="16" RowSpacing="12">
             <Grid.RowDefinitions>

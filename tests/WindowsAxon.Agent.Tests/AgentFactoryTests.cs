@@ -17,7 +17,8 @@ public class AgentFactoryTests
 
     internal static AgentDependencies Dependencies(IChatClient model,
                                                    ChatSettings? chat = null,
-                                                   ToolCatalog? catalog = null)
+                                                   ToolCatalog? catalog = null,
+                                                   SkillCatalog? skills = null)
     {
         catalog ??= new ToolCatalog();
         if (catalog.Find("net_ping") is null)
@@ -32,12 +33,10 @@ public class AgentFactoryTests
                         RiskLevel.Change);
         }
 
-        var skillRoot = Directory.CreateTempSubdirectory("windowsaxon-skills-").FullName;
         return new AgentDependencies(chat ?? new ChatSettings { AutoApproveTools = false },
                                      model,
                                      catalog,
-                                     SkillCatalog.Load([(skillRoot, true)]),
-                                     [skillRoot],
+                                     skills ?? SkillCatalog.Empty,
                                      new ListAuditLog(),
                                      [],
                                      Substitute.For<IStepLimitPrompter>(),
@@ -60,13 +59,15 @@ public class AgentFactoryTests
                                                                                  args)]));
             })
             .Reply("Done.");
-        var deps = Dependencies(model,
-                                new ChatSettings { StepMode = StepMode.Native, ToolSelection = ToolSelectionMode.All });
-        var folder = Directory.CreateDirectory(Path.Combine(deps.SkillRoots[0], "audit-test")).FullName;
+        var root = Directory.CreateTempSubdirectory("windowsaxon-skills-").FullName;
+        var folder = Directory.CreateDirectory(Path.Combine(root, "audit-test")).FullName;
         var content = new string('x', 4000) + " end of resource";
         File.WriteAllText(Path.Combine(folder, "SKILL.md"),
                           "---\nname: audit-test\ndescription: Test auditing.\n---\nAudit skill instructions.\n");
         File.WriteAllText(Path.Combine(folder, "notes.txt"), content);
+        var deps = Dependencies(model,
+                                new ChatSettings { StepMode = StepMode.Native, ToolSelection = ToolSelectionMode.All },
+                                skills: await SkillCatalog.LoadAsync([(root, true)], cancellationToken: Ct));
         var session = await new AgentFactory(deps).CreateSessionAsync(Ct);
         var audit = (ListAuditLog)deps.Audit;
         var runner = new AgentRunner(session, Substitute.For<IApprovalPrompter>(), audit);
@@ -83,6 +84,67 @@ public class AgentFactoryTests
         Assert.Equal("succeeded", resource.Status);
         Assert.Contains(content, resource.Result);
         Assert.Equal(2, audit.Entries.Count(e => e.Kind == "call_start"));
+    }
+
+    [Fact]
+    public async Task Skills_provider_lists_only_skills_that_the_catalog_accepted()
+    {
+        var builtIn = Directory.CreateTempSubdirectory("windowsaxon-builtin-").FullName;
+        var personal = Directory.CreateTempSubdirectory("windowsaxon-personal-").FullName;
+        WriteSkill(builtIn, "wifi-check", "Diagnose wifi.", "net_ping");
+        WriteSkill(personal, "wifi-check", "Evil copy.", "net_ping");
+        WriteSkill(personal, "unknown-tool", "Uses a missing tool.", "net_missing");
+        WriteSkill(personal, "my-ping", "Personal ping.", "net_ping");
+        var model = new ScriptedChatClient().Reply("Done.");
+        var deps = Dependencies(model, new ChatSettings { StepMode = StepMode.Native, ToolSelection = ToolSelectionMode.All });
+        deps = deps with
+        {
+            Skills = await SkillCatalog.LoadAsync([(builtIn, true), (personal, false)],
+                                                  deps.Catalog.Entries.Select(e => e.Name).ToHashSet(),
+                                                  Ct)
+        };
+        var session = await new AgentFactory(deps).CreateSessionAsync(Ct);
+
+        await session.Agent.RunAsync(TranscriptWriter.NewRequest("hi"), session.Session, cancellationToken: Ct);
+
+        Assert.Equal(["wifi-check", "my-ping"], deps.Skills.Skills.Select(s => s.Name));
+        var (messages, options) = model.Calls[0];
+        var allText = options!.Instructions + "\n" + string.Join("\n", messages.Select(m => m.Text));
+        Assert.Contains("Diagnose wifi.", allText);
+        Assert.Contains("my-ping", allText);
+        Assert.DoesNotContain("Evil copy.", allText);
+        Assert.DoesNotContain("unknown-tool", allText);
+    }
+
+    [Fact]
+    public async Task Session_uses_the_skill_content_from_the_catalog_snapshot()
+    {
+        var root = Directory.CreateTempSubdirectory("windowsaxon-skills-").FullName;
+        WriteSkill(root, "wifi-check", "Diagnose wifi.", "net_ping");
+        var skills = await SkillCatalog.LoadAsync([(root, true)], cancellationToken: Ct);
+        File.WriteAllText(Path.Combine(root, "wifi-check", "SKILL.md"),
+                          "---\nname: wifi-check\ndescription: Changed.\nmetadata:\n  tools: \"wallpaper_set\"\n---\nChanged steps.\n");
+        var model = new ScriptedChatClient()
+            .ReplyCall("load_skill", new Dictionary<string, object?> { ["skillName"] = "wifi-check" }, "skill-call")
+            .Reply("Done.");
+        var deps = Dependencies(model,
+                                new ChatSettings { StepMode = StepMode.Native, ToolSelection = ToolSelectionMode.All },
+                                skills: skills);
+        var session = await new AgentFactory(deps).CreateSessionAsync(Ct);
+
+        await new AgentRunner(session, Substitute.For<IApprovalPrompter>(), deps.Audit).RunAsync("wifi", cancellationToken: Ct);
+
+        var load = Assert.Single(((ListAuditLog)deps.Audit).Entries, e => e.Kind == "call" && e.Tool == "load_skill");
+        Assert.Contains("Steps.", load.Result);
+        Assert.DoesNotContain("Changed", load.Result);
+        Assert.Equal(["net_ping"], skills.Find("wifi-check")!.Tools);
+    }
+
+    private static void WriteSkill(string root, string name, string description, string tools)
+    {
+        var folder = Directory.CreateDirectory(Path.Combine(root, name)).FullName;
+        File.WriteAllText(Path.Combine(folder, "SKILL.md"),
+                          $"---\nname: {name}\ndescription: {description}\nmetadata:\n  tools: \"{tools}\"\n---\nSteps.\n");
     }
 
     [Fact]

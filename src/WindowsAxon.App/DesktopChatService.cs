@@ -23,6 +23,54 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
 
     public static string SettingsPath => ConfigOverride ?? Path.Combine(DataFolder, "settings.json");
 
+    public static string BuiltInSkillsFolder => Path.Combine(AppContext.BaseDirectory, "app-skills");
+
+    public static string UserSkillsFolder => WindowsToolSet.SkillsFolder(DataFolder);
+
+    /// <summary>The names of every tool that a chat registers, built once with the same code as a chat.</summary>
+    public static IReadOnlySet<string> ToolNames => KnownTools.Value;
+
+    // PublicationOnly: a failed build is not cached, so the next call tries again.
+    private static readonly Lazy<IReadOnlySet<string>> KnownTools = new(() =>
+    {
+        var catalog = new ToolCatalog();
+        using var model = new UnavailableChatClient();
+        // An empty app index, so the names are read without scanning the installed apps.
+        CreateTools(catalog,
+                    new WindowsAppTools(() => [], (_, _) => Task.FromResult("")),
+                    new WindowsWindowTools(),
+                    model,
+                    "skills",
+                    () => { },
+                    _ => { },
+                    null).Dispose();
+        return catalog.Entries.Select(e => e.Name).ToHashSet();
+    }, LazyThreadSafetyMode.PublicationOnly);
+
+    public static SkillLibrary CreateSkillLibrary() => new(BuiltInSkillsFolder, UserSkillsFolder, ToolNames);
+
+    /// <summary>Registers every chat tool. RunAsync and ToolNames both use it, so they cannot differ.</summary>
+    private static WindowsToolSet CreateTools(ToolCatalog catalog,
+                                              WindowsAppTools appTools,
+                                              WindowsWindowTools windowTools,
+                                              IChatClient model,
+                                              string session,
+                                              Action emergencyStop,
+                                              Action<bool> inputActive,
+                                              IEnumerable<string>? allowedPrivateHosts)
+    {
+        ToolRegistration.Add(catalog, appTools);
+        ToolRegistration.Add(catalog, windowTools);
+        return new WindowsToolSet(catalog,
+                                  model,
+                                  DataFolder,
+                                  session,
+                                  windowTools.ResolveHandle,
+                                  emergencyStop,
+                                  inputActive,
+                                  allowedPrivateHosts);
+    }
+
     private readonly string _settingsPath = settingsPath is null ? SettingsPath : Path.GetFullPath(settingsPath);
 
     private static string? GetConfigOverride()
@@ -75,24 +123,26 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
             var appTools = new WindowsAppTools();
             var windowTools = new WindowsWindowTools();
             var catalog = new ToolCatalog();
-            ToolRegistration.Add(catalog, appTools);
-            ToolRegistration.Add(catalog, windowTools);
-            _toolSet = new WindowsToolSet(catalog,
-                                          _model,
-                                          DataFolder,
-                                          Guid.NewGuid().ToString("N"),
-                                          windowTools.ResolveHandle,
-                                          () => EmergencyStopRequested?.Invoke(),
-                                          active => InputActiveChanged?.Invoke(active),
-                                          Settings.Chat.AllowedPrivateHosts);
-            var skillsRoot = Path.Combine(AppContext.BaseDirectory, "app-skills");
+            _toolSet = CreateTools(catalog,
+                                   appTools,
+                                   windowTools,
+                                   _model,
+                                   Guid.NewGuid().ToString("N"),
+                                   () => EmergencyStopRequested?.Invoke(),
+                                   active => InputActiveChanged?.Invoke(active),
+                                   Settings.Chat.AllowedPrivateHosts);
             var audit = new ToolStartAuditLog(new JsonlAuditLog(Path.Combine(DataFolder, "logs")),
                                               tool => ToolStarted?.Invoke(tool));
+            var toolNames = catalog.Entries.Select(e => e.Name).ToHashSet();
+            // Off the UI thread: loading reads every SKILL.md.
+            var skills = await Task.Run(() => SkillCatalog.LoadAsync([(BuiltInSkillsFolder, true), (UserSkillsFolder, false)],
+                                                                     toolNames,
+                                                                     cancellationToken),
+                                        cancellationToken);
             var dependencies = new AgentDependencies(factory.Settings.Chat,
                                                      _model,
                                                      catalog,
-                                                     SkillCatalog.Load([(skillsRoot, true)]),
-                                                     [skillsRoot],
+                                                     skills,
                                                      audit,
                                                      [
 appTools,

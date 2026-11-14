@@ -71,7 +71,7 @@ public class ToolScopeChatClientTests
         var dir = Directory.CreateDirectory(Path.Combine(root.FullName, skill.Name));
         File.WriteAllText(Path.Combine(dir.FullName, "SKILL.md"),
                           $"---\nname: {skill.Name}\ndescription: {skill.Description}\nmetadata:\n  tools: \"{string.Join(' ', skill.Tools)}\"\n---\nbody");
-        return SkillCatalog.Load([(root.FullName, true)]);
+        return Task.Run(() => SkillCatalog.LoadAsync([(root.FullName, true)])).GetAwaiter().GetResult();
     }
 
     private static ChatMessage[] LoadSkillHistory(string callId = "s1") =>

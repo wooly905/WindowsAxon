@@ -5,7 +5,8 @@ using Microsoft.Extensions.AI;
 
 namespace WindowsAxon.Windows;
 
-public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
+/// <param name="skillsFolder">The personal skills folder, which paint_save must not write to.</param>
+public sealed class PaintTools(DesktopUiTools ui, string? skillsFolder = null) : IApprovalRule
 {
     public bool AppliesTo(string toolName) => toolName is "paint_new_canvas" or "paint_draw_shape" or "paint_draw_free" or "paint_add_text" or "paint_save";
 
@@ -326,7 +327,7 @@ public sealed class PaintTools(DesktopUiTools ui) : IApprovalRule
     {
         return ApartmentThread.Run(ApartmentState.MTA, () =>
         {
-            path = Path.GetFullPath(path);
+            path = SkillsFolderGuard.Check(path, skillsFolder);
             if (File.Exists(path))
             {
                 throw new ArgumentException("Choose a new file path; overwriting is not supported.");
