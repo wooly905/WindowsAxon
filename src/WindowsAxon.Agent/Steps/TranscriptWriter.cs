@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Security;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 
 namespace WindowsAxon.Agent.Steps;
@@ -144,7 +146,7 @@ public sealed class TranscriptWriter(int contextWindow)
                 foreach (var functionResult in message.Contents.OfType<FunctionResultContent>())
                 {
                     var name = toolNames.GetValueOrDefault(functionResult.CallId, "unknown");
-                    var observation = Observation(name, ObservationText(functionResult.Result));
+                    var observation = Observation(name, functionResult.CallId, ObservationText(functionResult.Result));
                     result.Add(functionResult == lastImage
                         ? new ChatMessage(ChatRole.User, [new TextContent(observation), .. Images(functionResult.Result)])
                         : new ChatMessage(ChatRole.User, observation));
@@ -184,7 +186,13 @@ public sealed class TranscriptWriter(int contextWindow)
         return scratchpad;
     }
 
-    private static string Observation(string tool, string body) => $"<observation tool=\"{tool}\">{body}</observation>";
+    private static string Observation(string tool, string callId, string body)
+    {
+        // Neutralize observation delimiters; ordinary source code remains literal.
+        body = Regex.Replace(body, @"<(?=/?observation(?:[\s/>]|$))", "&lt;", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        return $"<observation tool=\"{SecurityElement.Escape(tool)}\" source=\"{SecurityElement.Escape(callId)}\" trusted=\"false\">{body}</observation>";
+    }
 
     private static string StepJson(string thought, string action, IDictionary<string, object?>? args, string? answer)
     {

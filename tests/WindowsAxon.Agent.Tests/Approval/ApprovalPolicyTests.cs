@@ -1,3 +1,4 @@
+using NSubstitute;
 using WindowsAxon.Agent.Approval;
 using WindowsAxon.Agent.Tools;
 
@@ -5,6 +6,20 @@ namespace WindowsAxon.Agent.Tests.Approval;
 
 public class ApprovalPolicyTests
 {
+    [Fact]
+    public void Automatic_read_approval_does_not_run_the_rule_decision()
+    {
+        var catalog = new ToolCatalog();
+        catalog.Add(AIFunctionFactory.Create(() => "", "read"), "local", RiskLevel.Read);
+        var rule = Substitute.For<IApprovalRule>();
+        rule.AppliesTo("read").Returns(true);
+        var policy = new ApprovalPolicy(catalog, [rule], autoApprove: true);
+
+        Assert.Equal(ApprovalOutcome.AutoApprove, policy.Decide(new FunctionCallContent("id", "read")).Outcome);
+        rule.DidNotReceiveWithAnyArgs().Decide(default!);
+        rule.Received(1).AlwaysAsks(Arg.Any<FunctionCallContent>());
+    }
+
     private static ApprovalPolicy Policy(bool remote = false, bool autoApprove = false)
     {
         var catalog = new ToolCatalog();
@@ -20,9 +35,9 @@ public class ApprovalPolicyTests
     [InlineData("wallpaper_set")]
     [InlineData("fs_delete")]
     [InlineData("fs_read_text")]
-    public void Auto_approve_runs_known_tools_without_asking(string tool)
+    public void Auto_approve_cannot_bypass_sensitive_actions(string tool)
     {
-        Assert.Equal(ApprovalOutcome.AutoApprove, Policy(remote: true, autoApprove: true).Decide(Call(tool)).Outcome);
+        Assert.Equal(ApprovalOutcome.Ask, Policy(remote: true, autoApprove: true).Decide(Call(tool)).Outcome);
     }
 
     [Fact]
@@ -38,20 +53,20 @@ public class ApprovalPolicyTests
     }
 
     [Fact]
-    public void Change_tool_asks_and_offers_allow_for_conversation()
+    public void Change_tool_asks_without_conversation_grant()
     {
         var decision = Policy().Decide(Call("wallpaper_set"));
 
-        Assert.Equal(new ApprovalDecision(ApprovalOutcome.Ask, true, null), decision);
+        Assert.Equal(new ApprovalDecision(ApprovalOutcome.Ask, false, null), decision);
     }
 
     [Fact]
-    public void Change_tool_allowed_for_the_conversation_is_approved_automatically()
+    public void Change_tool_cannot_inherit_a_conversation_grant()
     {
         var policy = Policy();
-        policy.AllowForConversation("wallpaper_set");
+        policy.AllowForConversation(Call("wallpaper_set"));
 
-        Assert.Equal(ApprovalOutcome.AutoApprove, policy.Decide(Call("wallpaper_set")).Outcome);
+        Assert.Equal(ApprovalOutcome.Ask, policy.Decide(Call("wallpaper_set")).Outcome);
 
         policy.Reset();
         Assert.Equal(ApprovalOutcome.Ask, policy.Decide(Call("wallpaper_set")).Outcome);
@@ -61,7 +76,7 @@ public class ApprovalPolicyTests
     public void Danger_tool_asks_every_time()
     {
         var policy = Policy();
-        policy.AllowForConversation("fs_delete");
+        policy.AllowForConversation(Call("fs_delete"));
 
         Assert.Equal(new ApprovalDecision(ApprovalOutcome.Ask, false, null), policy.Decide(Call("fs_delete")));
     }
@@ -89,7 +104,18 @@ public class ApprovalPolicyTests
         Assert.True(decision.AllowForConversation);
         Assert.Equal("The content will be sent to api.example.com.", decision.Note);
 
-        policy.AllowForConversation("fs_read_text");
+        policy.AllowForConversation(Call("fs_read_text"));
         Assert.Equal(ApprovalOutcome.AutoApprove, policy.Decide(Call("fs_read_text")).Outcome);
+    }
+
+    [Fact]
+    public void Sensitive_read_with_arguments_hides_the_conversation_option()
+    {
+        var call = new FunctionCallContent("1", "fs_read_text", new Dictionary<string, object?> { ["path"] = "a.txt" });
+
+        var decision = Policy(remote: true).Decide(call);
+
+        Assert.Equal(ApprovalOutcome.Ask, decision.Outcome);
+        Assert.False(decision.AllowForConversation);
     }
 }

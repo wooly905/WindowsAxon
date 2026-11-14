@@ -8,7 +8,8 @@ public sealed class ToolAttribute(string name,
                                   bool policyDriven = false,
                                   int timeoutSeconds = 30,
                                   bool artifact = false,
-                                  bool alwaysInclude = false) : Attribute
+                                  bool alwaysInclude = false,
+                                  bool outbound = false) : Attribute
 {
     public string Name { get; } = name;
 
@@ -18,6 +19,8 @@ public sealed class ToolAttribute(string name,
     public string Description { get; } = description;
 
     public RiskLevel Risk { get; } = risk;
+
+    public bool Outbound { get; } = outbound;
 
     public bool PolicyDriven { get; } = policyDriven;
 

@@ -29,7 +29,8 @@ public sealed class ToolCatalog
                     bool policyDriven = false,
                     TimeSpan? timeout = null,
                     bool artifact = false,
-                    bool alwaysInclude = false)
+                    bool alwaysInclude = false,
+                    bool outbound = false)
     {
         ArgumentNullException.ThrowIfNull(function);
         ArgumentException.ThrowIfNullOrWhiteSpace(group);
@@ -46,7 +47,8 @@ public sealed class ToolCatalog
                                    timeout ?? DefaultTimeout,
                                    function,
                                    artifact,
-                                   alwaysInclude));
+                                   alwaysInclude,
+                                   outbound));
     }
 
     public ToolEntry? Find(string name) => _entries.FirstOrDefault(e => e.Name == name);

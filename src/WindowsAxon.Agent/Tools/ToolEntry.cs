@@ -9,7 +9,8 @@ public sealed record ToolEntry(string Name,
                                TimeSpan Timeout,
                                AIFunction Function,
                                bool Artifact = false,
-                               bool AlwaysInclude = false)
+                               bool AlwaysInclude = false,
+                               bool Outbound = false)
 {
-    public bool NeedsApproval => PolicyDriven || Risk >= RiskLevel.Change;
+    public bool NeedsApproval => Outbound || PolicyDriven || Risk >= RiskLevel.Change;
 }

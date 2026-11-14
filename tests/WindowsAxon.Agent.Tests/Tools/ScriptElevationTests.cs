@@ -92,7 +92,7 @@ public sealed class ScriptElevationTests : IDisposable
     }
 
     [Fact]
-    public async Task Auto_approve_still_shows_the_card_for_an_elevated_script_only()
+    public async Task Auto_approve_cannot_skip_any_script_execution_card()
     {
         var scripts = Tools("Write-Output 'x'", NeverLaunch);
         var catalog = new ToolCatalog();
@@ -107,7 +107,7 @@ public sealed class ScriptElevationTests : IDisposable
         Assert.Equal(ApprovalOutcome.Ask, elevated.Outcome);
         Assert.False(elevated.AllowForConversation);
         Assert.Contains("administrator rights", elevated.Note);
-        Assert.Equal(ApprovalOutcome.AutoApprove, plain.Outcome);
+        Assert.Equal(ApprovalOutcome.Ask, plain.Outcome);
         Assert.Equal(ApprovalOutcome.Ask, unknown.Outcome);
     }
 

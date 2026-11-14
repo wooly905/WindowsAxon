@@ -13,6 +13,104 @@ namespace WindowsAxon.Agent.Tests.Tools;
 
 public sealed class WebToolsTests
 {
+    private static readonly Uri Source = new("https://public.invalid/page");
+
+    [Fact]
+    public async Task Offline_page_uses_the_ten_second_timeout()
+    {
+        var browser = Substitute.For<IBrowser>();
+        var context = Substitute.For<IBrowserContext>();
+        browser.NewContextAsync(Arg.Any<BrowserNewContextOptions>()).Returns(context);
+        context.NewPageAsync().Returns(Substitute.For<IPage>());
+
+        await WebTools.OfflinePageAsync(browser);
+
+        context.Received(1).SetDefaultTimeout(10000);
+    }
+
+    [Fact]
+    public async Task Missing_browser_has_a_clear_connection_error()
+    {
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => WebTools.OfflinePageAsync(null));
+
+        Assert.Equal("The hidden browser did not connect.", error.Message);
+    }
+
+    [Theory]
+    [InlineData("", "https://public.invalid/two")]
+    [InlineData("<base href='https://cdn.invalid/assets/'>", "https://cdn.invalid/two")]
+    [InlineData("<base href='/assets/'>", "https://public.invalid/two")]
+    [InlineData("<base href='http://['>", "https://public.invalid/two")]
+    public async Task Offline_content_preserves_standards_mode_and_resolves_relative_links(string baseTag, string expected)
+    {
+        using var playwright = await Playwright.CreateAsync();
+        await using var browser = await playwright.Chromium.LaunchAsync(new()
+        {
+            Channel = "msedge",
+            Headless = true
+        });
+        var page = await WebTools.OfflinePageAsync(browser);
+
+        await WebTools.SetPageContentAsync(page, new Uri("https://public.invalid/articles/one"),
+            $"<!DOCTYPE html><html><head>{baseTag}</head><body><a href='../two'>Article</a></body></html>");
+
+        Assert.Equal("CSS1Compat", await page.EvaluateAsync<string>("() => document.compatMode"));
+        Assert.Equal(expected, await page.EvaluateAsync<string>("() => document.querySelector('a').href"));
+        Assert.Equal("Article", await BrowserTools.ReadVisibleTextAsync(page));
+    }
+
+    [Theory]
+    [InlineData("https://accounts.google.com/v3/signin", true)]
+    [InlineData("https://login.microsoftonline.com/common", true)]
+    [InlineData("https://public.invalid/account/login?next=/", true)]
+    [InlineData("https://public.invalid/sign-in/", true)]
+    [InlineData("https://public.invalid/blog/login-tips", false)]
+    public void Sign_in_detection_uses_the_fetched_url(string url, bool expected)
+    {
+        Assert.Equal(expected, WebTools.IsSignInUrl(new Uri(url)));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Search results could not be parsed.")]
+    public void Search_fallback_names_the_fetched_url_instead_of_the_offline_page(string text)
+    {
+        var result = WebTools.SearchFallback(new Uri("https://www.bing.com/search?q=fixture"), text);
+
+        Assert.Contains("https://www.bing.com/search?q=fixture", result);
+        Assert.DoesNotContain("about:blank", result);
+    }
+
+    [Fact]
+    public async Task Offline_parser_blocks_scripts_and_subresource_requests()
+    {
+        using var playwright = await Playwright.CreateAsync();
+        await using var browser = await playwright.Chromium.LaunchAsync(new()
+        {
+            Channel = "msedge",
+            Headless = true
+        });
+        var page = await WebTools.OfflinePageAsync(browser);
+        var failedRequest = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        page.RequestFailed += (_, request) =>
+        {
+            if (request.Url.Contains("TEST_CANARY_9", StringComparison.Ordinal))
+            {
+                failedRequest.TrySetResult();
+            }
+        };
+
+        await page.SetContentAsync("""
+            <h1>Article</h1>
+            <script>window.injected = true; fetch('https://attacker.invalid/script');</script>
+            <img src="http://127.0.0.1/TEST_CANARY_9">
+            """);
+        await failedRequest.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        Assert.False(await page.EvaluateAsync<bool>("() => window.injected === true"));
+        Assert.Contains("Article", await BrowserTools.ReadVisibleTextAsync(page));
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -62,20 +160,6 @@ public sealed class WebToolsTests
         Assert.DoesNotContain("skip", formatted);
     }
 
-    [Theory]
-    [InlineData(403)]
-    [InlineData(429)]
-    [InlineData(503)]
-    public async Task Readable_check_rejects_a_blocked_status(int status)
-    {
-        var response = Substitute.For<IResponse>();
-        response.Status.Returns(status);
-
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => WebTools.EnsureReadableAsync(null, response));
-
-        Assert.Equal(WebTools.BlockedStatusMessage(status), error.Message);
-    }
-
     [Fact]
     public async Task Readable_check_rejects_captcha_sign_in_and_human_verification()
     {
@@ -88,19 +172,19 @@ public sealed class WebToolsTests
         var page = await (await browser.NewContextAsync()).NewPageAsync();
 
         await page.SetContentAsync("<div class='g-recaptcha'></div>");
-        var captcha = await Assert.ThrowsAsync<InvalidOperationException>(() => WebTools.EnsureReadableAsync(page, null));
+        var captcha = await Assert.ThrowsAsync<InvalidOperationException>(() => WebTools.EnsureReadableAsync(page, Source));
         Assert.Equal(WebTools.CaptchaMessage, captcha.Message);
 
         await page.SetContentAsync("<p>Please verify you are human before continuing.</p>");
-        var blocked = await Assert.ThrowsAsync<InvalidOperationException>(() => WebTools.EnsureReadableAsync(page, null));
+        var blocked = await Assert.ThrowsAsync<InvalidOperationException>(() => WebTools.EnsureReadableAsync(page, Source));
         Assert.Equal(WebTools.BlockedMessage, blocked.Message);
 
         await page.SetContentAsync("<form><input type='password'></form>");
-        var signIn = await Assert.ThrowsAsync<InvalidOperationException>(() => WebTools.EnsureReadableAsync(page, null));
+        var signIn = await Assert.ThrowsAsync<InvalidOperationException>(() => WebTools.EnsureReadableAsync(page, Source));
         Assert.Equal(WebTools.SignInMessage, signIn.Message);
 
         await page.SetContentAsync("<h1>CPU upgrade</h1>");
-        await WebTools.EnsureReadableAsync(page, null);
+        await WebTools.EnsureReadableAsync(page, Source);
     }
 
     [Fact]
@@ -110,10 +194,12 @@ public sealed class WebToolsTests
         var text = new string('y', 3000);
         catalog.Add(AIFunctionFactory.Create(() => text, "web_read"), "web", RiskLevel.Read, policyDriven: true);
         var state = new ToolSelectionState(catalog, 14) { AllToolsActive = true };
+        var ledger = new ApprovalLedger();
+        ledger.Record(new FunctionCallContent("", "web_read"), true);
         var guard = new GuardedAIFunction(catalog.Find("web_read")!,
                                           state,
                                           new CallTracker(),
-                                          new ApprovalLedger(),
+                                          ledger,
                                           new ListAuditLog());
 
         var result = await guard.InvokeAsync(new AIFunctionArguments(), TestContext.Current.CancellationToken);

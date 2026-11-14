@@ -21,24 +21,55 @@ public sealed class ApprovalPolicy(ToolCatalog catalog, IEnumerable<IApprovalRul
         }
 
         var rule = _rules.FirstOrDefault(r => r.AppliesTo(call.Name));
-        if (autoApprove && rule?.AlwaysAsks(call) != true)
+        var alwaysAsks = rule?.AlwaysAsks(call) == true;
+
+        if (autoApprove && !entry.Outbound && entry.Risk < RiskLevel.Change
+            && !entry.PolicyDriven && !alwaysAsks)
         {
             return Auto;
         }
 
-        var decision = rule?.Decide(call)
-            ?? new ApprovalDecision(ApprovalOutcome.Ask, entry.Risk == RiskLevel.Change, null);
+        var ruleDecision = rule?.Decide(call);
 
-        return decision is { Outcome: ApprovalOutcome.Ask, AllowForConversation: true } && _allowed.Contains(call.Name)
-            ? decision with
+        if (entry.Outbound)
+        {
+            return new ApprovalDecision(ApprovalOutcome.Ask, false,
+                ruleDecision?.Note ?? "This request sends its arguments to a network destination. Review the destination and complete arguments.");
+        }
+
+        if (entry.Risk >= RiskLevel.Change || alwaysAsks)
+        {
+            return new ApprovalDecision(ApprovalOutcome.Ask, false, ruleDecision?.Note);
+        }
+
+        var decision = ruleDecision
+            ?? AskEachTime;
+
+        if (decision is not { Outcome: ApprovalOutcome.Ask, AllowForConversation: true })
+        {
+            return decision;
+        }
+
+        if (_allowed.Contains(ToolCallIdentity.Fingerprint(call.Name, call.Arguments)))
+        {
+            return decision with
             {
                 Outcome = ApprovalOutcome.AutoApprove
+            };
+        }
+
+        // A grant matches exact arguments only, so the option helps only calls without arguments.
+        return call.Arguments is { Count: > 0 }
+            ? decision with
+            {
+                AllowForConversation = false
             }
             : decision;
     }
 
-    /// <summary>The user selected "Allow for this conversation". Has no effect for tools that ask each time.</summary>
-    public void AllowForConversation(string toolName) => _allowed.Add(toolName);
+    /// <summary>The user allowed this exact read again in the conversation. Has no effect for tools that ask each time.</summary>
+    public void AllowForConversation(FunctionCallContent call) =>
+        _allowed.Add(ToolCallIdentity.Fingerprint(call.Name, call.Arguments));
 
     public void Reset() => _allowed.Clear();
 

@@ -1,3 +1,7 @@
+using WindowsAxon.Agent.Tools;
+using WindowsAxon.Agent.Selection;
+using WindowsAxon.Agent.Guard;
+using WindowsAxon.Agent.Audit;
 using WindowsAxon.Agent.Settings;
 using WindowsAxon.Agent.Tests.Fakes;
 using WindowsAxon.Eval;
@@ -6,6 +10,44 @@ namespace WindowsAxon.Agent.Tests.Eval;
 
 public class EvalRunnerTests
 {
+    [Fact]
+    public async Task Guarded_attempts_do_not_count_as_unapproved_execution()
+    {
+        var catalog = new ToolCatalog();
+        catalog.Add(AIFunctionFactory.Create((Func<string>)(() => throw new InvalidOperationException("Must not run.")), "write"),
+                    "files", RiskLevel.Change);
+        var audit = new EvalAuditLog();
+        var guard = new GuardedAIFunction(catalog.Find("write")!,
+            new ToolSelectionState(catalog, 14) { AllToolsActive = true },
+            new CallTracker(), new ApprovalLedger(), audit);
+
+        await guard.InvokeAsync(new AIFunctionArguments(), TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, audit.BlockedUnapprovedCalls);
+        Assert.Equal(0, audit.UnapprovedCalls);
+        var summary = EvalSummary.From([
+            new EvalResult("fixture", true, null, null, 0, 0, 0, 0, audit.UnapprovedCalls, 0, [], "Blocked",
+                BlockedUnapproved: audit.BlockedUnapprovedCalls)
+        ]);
+        Assert.False(summary.PassesM1Gate(smallModel: false));
+        Assert.Single(audit.Failures);
+        Assert.Equal(1, summary.BlockedUnapproved);
+    }
+
+    [Theory]
+    [InlineData("succeeded")]
+    [InlineData("failed")]
+    [InlineData("cancelled")]
+    public void Execution_without_approval_remains_a_gate_failure(string status)
+    {
+        var audit = new EvalAuditLog();
+        audit.Write(new AuditEntry(DateTimeOffset.Now,
+            "call", "fixture", "write", "{}", "Change", "missing", false, Status: status));
+
+        Assert.Equal(1, audit.UnapprovedCalls);
+        Assert.Equal(0, audit.BlockedUnapprovedCalls);
+    }
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private static EvalRunner Runner(ScriptedChatClient model) => new(() => model,

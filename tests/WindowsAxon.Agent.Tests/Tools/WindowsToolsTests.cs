@@ -10,6 +10,23 @@ namespace WindowsAxon.Agent.Tests.Tools;
 
 public sealed class WindowsToolsTests : IAsyncDisposable
 {
+    [Fact]
+    public void Software_approval_shows_the_notice_and_package_details()
+    {
+        var tools = new SoftwareTools();
+        var catalog = new ToolCatalog();
+        ToolRegistration.Add(catalog, tools);
+        var policy = new ApprovalPolicy(catalog, [tools], autoApprove: true);
+
+        var decision = policy.Decide(new FunctionCallContent("fixture", "winget_install",
+            new Dictionary<string, object?> { ["id"] = "Fixture.Package" }));
+
+        Assert.Equal(ApprovalOutcome.Ask, decision.Outcome);
+        Assert.False(decision.AllowForConversation);
+        Assert.StartsWith("Install Fixture.Package, source winget, current user. This accepts package and source agreements. No undo.\n",
+            decision.Note);
+    }
+
     private readonly string _folder = Path.Combine(Path.GetTempPath(),
                                                    "windowsaxon-tools-test-" + Guid.NewGuid().ToString("N"));
 
@@ -272,12 +289,18 @@ public sealed class WindowsToolsTests : IAsyncDisposable
             .Single(tool => tool.Name == name));
         var call = new FunctionCallContent("test", name);
         var decision = policy.Decide(call);
+        if (name is "web_search" or "web_read")
+        {
+            Assert.Equal(ApprovalOutcome.Ask, decision.Outcome);
+            Assert.False(decision.AllowForConversation);
+            return;
+        }
         Assert.Equal(remote ? ApprovalOutcome.Ask : ApprovalOutcome.AutoApprove, decision.Outcome);
         Assert.Equal(remote, decision.AllowForConversation);
         if (remote)
         {
             Assert.Contains("api.example.com", decision.Note);
-            policy.AllowForConversation(name);
+            policy.AllowForConversation(new FunctionCallContent("grant", name));
             Assert.Equal(ApprovalOutcome.AutoApprove, policy.Decide(call).Outcome);
         }
     }
@@ -337,7 +360,7 @@ public sealed class WindowsToolsTests : IAsyncDisposable
             var decision = policy.Decide(call);
             Assert.Equal(ApprovalOutcome.Ask, decision.Outcome);
             Assert.False(decision.AllowForConversation);
-            policy.AllowForConversation(name);
+            policy.AllowForConversation(new FunctionCallContent("grant", name));
             Assert.Equal(ApprovalOutcome.Ask, policy.Decide(call).Outcome);
         }
     }
@@ -449,7 +472,7 @@ public sealed class WindowsToolsTests : IAsyncDisposable
         var policy = new ApprovalPolicy(catalog, tools.ApprovalRules);
         foreach (var name in new[] { "script_run", "browser_click", "ui_click", "undo_last", "clipboard_get" })
         {
-            policy.AllowForConversation(name);
+            policy.AllowForConversation(new FunctionCallContent("grant", name));
             Assert.Equal(ApprovalOutcome.Ask,
                          policy.Decide(new FunctionCallContent("test",
                                                                name,
@@ -526,6 +549,11 @@ public sealed class WindowsToolsTests : IAsyncDisposable
         Assert.Equal(ApprovalOutcome.Ask, decision.Outcome);
         Assert.False(decision.AllowForConversation);
         Assert.Equal("Your documentation query, code-sample query, or article URL will be sent to Microsoft Learn.", decision.Note);
+        var catalog = new ToolCatalog();
+        ToolRegistration.Add(catalog, docs);
+        var policy = new ApprovalPolicy(catalog, [docs], autoApprove: true);
+        Assert.Equal(decision.Note, policy.Decide(call).Note);
+        Assert.Equal(ApprovalOutcome.Ask, policy.Decide(call).Outcome);
         Assert.Equal(decision, docs.Decide(new FunctionCallContent("call", "docs_search", new Dictionary<string, object?>())));
         Assert.Equal(decision, docs.Decide(new FunctionCallContent("call", "docs_fetch", new Dictionary<string, object?>())));
     }

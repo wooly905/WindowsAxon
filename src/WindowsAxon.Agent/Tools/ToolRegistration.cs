@@ -25,7 +25,8 @@ public static class ToolRegistration
                         tool.PolicyDriven,
                         TimeSpan.FromSeconds(tool.TimeoutSeconds),
                         tool.Artifact,
-                        tool.AlwaysInclude);
+                        tool.AlwaysInclude,
+                        tool.Outbound);
         }
     }
 

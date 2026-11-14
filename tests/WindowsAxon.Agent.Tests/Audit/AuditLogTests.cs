@@ -89,13 +89,11 @@ public class AuditLogTests
     {
         var ledger = new ApprovalLedger();
 
-        ledger.Record("c1", approved: true);
-        ledger.Record("c2", approved: false);
-        ledger.CountUnapproved();
+        ledger.Record(new FunctionCallContent("c1", "test"), approved: true);
+        ledger.Record(new FunctionCallContent("c2", "test"), approved: false);
 
-        Assert.True(ledger.Find("c1"));
-        Assert.False(ledger.Find("c2"));
-        Assert.Null(ledger.Find("c3"));
-        Assert.Equal(1, ledger.UnapprovedCalls);
+        Assert.True(ledger.Consume("c1", "test", new Dictionary<string, object?>()));
+        Assert.False(ledger.Consume("c2", "test", new Dictionary<string, object?>()));
+        Assert.False(ledger.Consume("c3", "test", new Dictionary<string, object?>()));
     }
 }

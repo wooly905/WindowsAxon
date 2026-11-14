@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Management;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using WindowsAxon.Agent.Tools;
 using Microsoft.Playwright;
 
@@ -11,7 +12,7 @@ namespace WindowsAxon.Windows;
 /// Public web lookup in a hidden browser. The visible browser and its profile are left alone.
 /// The hidden browser closes when the request ends, on Stop, on a new conversation, and when the app exits.
 /// </summary>
-public sealed class WebTools(string dataFolder) : ICancelableToolProvider, IDisposable
+public sealed class WebTools(string dataFolder, IEnumerable<string>? allowedPrivateHosts = null) : ICancelableToolProvider, IDisposable
 {
     internal const string BlockedMessage = "The site blocked automated reading. Try another address, or ask the user before opening the visible browser.";
     internal const string CaptchaMessage = "This page requires a CAPTCHA. Ask the user before opening it in the visible browser.";
@@ -42,14 +43,14 @@ public sealed class WebTools(string dataFolder) : ICancelableToolProvider, IDisp
           if (document.querySelector('.g-recaptcha,.h-captcha,iframe[src*=recaptcha],iframe[src*=hcaptcha]')) return 'captcha';
           const text = (document.body?.innerText || '').slice(0, 800).toLowerCase();
           if (text.includes('verify you are human') || text.includes('unusual traffic')) return 'blocked';
-          const url = location.href.toLowerCase();
-          if (url.includes('login.microsoftonline.com') || url.includes('accounts.google.com')
-              || /\/(signin|sign-in|login|logon)(\/|$|\?)/.test(url)) return 'signin';
           const password = document.querySelector('input[type=password]');
           if (password && (password.offsetWidth || password.offsetHeight || password.getClientRects().length)) return 'signin';
           return '';
         }
         """;
+
+    private static readonly Regex SignInPath = new(@"/(signin|sign-in|login|logon)(/|$)",
+                                                   RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -57,6 +58,7 @@ public sealed class WebTools(string dataFolder) : ICancelableToolProvider, IDisp
     };
 
     private readonly object _sync = new();
+    private readonly PublicWebFetcher _fetcher = new(allowedPrivateHosts: allowedPrivateHosts);
     private IPlaywright? _playwright;
     private IBrowser? _browser;
     private IPage? _page;
@@ -68,7 +70,8 @@ public sealed class WebTools(string dataFolder) : ICancelableToolProvider, IDisp
           "web",
           "Search the public web in a hidden browser and return up to 5 titles, URLs, and snippets. No window is shown. The hidden browser closes when the request ends. If the search is blocked or requires a CAPTCHA, ask the user before opening the visible browser. Remote endpoints require approval to receive content.",
           policyDriven: true,
-          timeoutSeconds: 60)]
+          timeoutSeconds: 60,
+          outbound: true)]
     public async Task<string> Search(string query, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query))
@@ -77,9 +80,8 @@ public sealed class WebTools(string dataFolder) : ICancelableToolProvider, IDisp
         }
 
         var page = await PageAsync(cancellationToken);
-        var response = await page.GotoAsync(SearchUrl(query),
-                                            new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
-        await EnsureReadableAsync(page, response);
+        var source = await LoadPublicPageAsync(page, SearchUrl(query), cancellationToken);
+        await EnsureReadableAsync(page, source);
         var json = await page.EvaluateAsync<string>(SearchResultsScript) ?? "[]";
         var formatted = FormatSearchResults(json);
         if (formatted.Length > 0)
@@ -88,30 +90,65 @@ public sealed class WebTools(string dataFolder) : ICancelableToolProvider, IDisp
         }
 
         var text = await BrowserTools.ReadVisibleTextAsync(page);
+        return SearchFallback(source, text);
+    }
+
+    internal static string SearchFallback(Uri source, string text)
+    {
         if (text.Length == 0)
         {
-            return $"No search results on {page.Url}. Try a more specific query.";
+            return $"No search results on {source.AbsoluteUri}. Try a more specific query.";
         }
 
         var excerpt = text.Length <= 1200 ? text : text[..1200];
-        return $"No structured results on {page.Url}. Page text:\n{excerpt}";
+        return $"No structured results on {source.AbsoluteUri}. Page text:\n{excerpt}";
     }
 
     [Tool("web_read",
           "web",
           "Read the visible text of an http or https page in a hidden browser, excluding HTML markup, scripts, styles, and hidden content. No window is shown. If the page requires sign-in or a CAPTCHA, or the site blocks automated reading, ask the user before opening the visible browser. Remote endpoints require approval to receive content.",
           policyDriven: true,
-          timeoutSeconds: 60)]
+          timeoutSeconds: 60,
+          outbound: true)]
     public async Task<string> Read(string url, CancellationToken cancellationToken = default)
     {
         var uri = BrowserTools.WebUrl(url);
         cancellationToken.ThrowIfCancellationRequested();
         var page = await PageAsync(cancellationToken);
-        var response = await page.GotoAsync(uri.AbsoluteUri,
-                                            new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
-        await EnsureReadableAsync(page, response);
+        var source = await LoadPublicPageAsync(page, uri.AbsoluteUri, cancellationToken);
+        await EnsureReadableAsync(page, source);
         var text = await BrowserTools.ReadVisibleTextAsync(page);
-        return text.Length == 0 ? "The page has no readable text." : text;
+        return $"Source: {source.AbsoluteUri}\n" + (text.Length == 0 ? "The page has no readable text." : text);
+    }
+
+    private async Task<Uri> LoadPublicPageAsync(IPage page, string url, CancellationToken cancellationToken)
+    {
+        var (source, content) = await _fetcher.FetchAsync(url, cancellationToken);
+        await SetPageContentAsync(page, source, content);
+
+        return source;
+    }
+
+    internal static async Task SetPageContentAsync(IPage page, Uri source, string content)
+    {
+        await page.SetContentAsync(content,
+                                   new PageSetContentOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
+        await page.EvaluateAsync("""
+            url => {
+                const existing = document.querySelector('base[href]');
+                if (existing) {
+                    try {
+                        existing.href = new URL(existing.getAttribute('href'), url).href;
+                    } catch {
+                        existing.href = url;
+                    }
+                } else {
+                    const base = document.createElement('base');
+                    base.href = url;
+                    document.head.prepend(base);
+                }
+            }
+            """, source.AbsoluteUri);
     }
 
     internal static string Profile(string dataFolder, string channel) =>
@@ -123,15 +160,16 @@ public sealed class WebTools(string dataFolder) : ICancelableToolProvider, IDisp
     internal static string BlockedStatusMessage(int status) =>
         $"The site returned HTTP {status} and blocked automated reading. Try another address, or ask the user before opening the visible browser.";
 
-    internal static async Task EnsureReadableAsync(IPage? page, IResponse? response)
-    {
-        if (response is { Status: 403 or 429 or 503 })
-        {
-            throw new InvalidOperationException(BlockedStatusMessage(response.Status));
-        }
+    // The offline page is at about:blank, so the sign-in URL check uses the fetched source.
+    internal static bool IsSignInUrl(Uri source) =>
+        source.Host.Equals("login.microsoftonline.com", StringComparison.OrdinalIgnoreCase)
+        || source.Host.Equals("accounts.google.com", StringComparison.OrdinalIgnoreCase)
+        || SignInPath.IsMatch(source.AbsolutePath);
 
+    internal static async Task EnsureReadableAsync(IPage page, Uri source)
+    {
         ArgumentNullException.ThrowIfNull(page);
-        var blocked = await page.EvaluateAsync<string>(PageBlockScript);
+        var blocked = IsSignInUrl(source) ? "signin" : await page.EvaluateAsync<string>(PageBlockScript);
         if (blocked == "captcha")
         {
             throw new InvalidOperationException(CaptchaMessage);
@@ -198,7 +236,11 @@ public sealed class WebTools(string dataFolder) : ICancelableToolProvider, IDisp
         }
     }
 
-    public void Dispose() => Close();
+    public void Dispose()
+    {
+        Close();
+        _fetcher.Dispose();
+    }
 
     void ICancelableToolProvider.CancelPending() => Close();
 
@@ -263,8 +305,8 @@ public sealed class WebTools(string dataFolder) : ICancelableToolProvider, IDisp
                                                               headless: true,
                                                               started: p => process = p,
                                                               cancellationToken);
-            context.SetDefaultTimeout(10000);
-            var page = context.Pages.FirstOrDefault(p => !p.IsClosed) ?? await context.NewPageAsync();
+            var browser = context.Browser ?? throw new InvalidOperationException("The hidden browser did not connect.");
+            var page = await OfflinePageAsync(browser);
             lock (_sync)
             {
                 if (generation != _generation)
@@ -272,7 +314,7 @@ public sealed class WebTools(string dataFolder) : ICancelableToolProvider, IDisp
                     throw new OperationCanceledException("Web lookup was stopped.");
                 }
 
-                _browser = context.Browser ?? throw new InvalidOperationException("The hidden browser did not connect.");
+                _browser = browser;
                 _process = process;
                 _profile = Profile(dataFolder, channel);
                 _page = page;
@@ -297,6 +339,24 @@ public sealed class WebTools(string dataFolder) : ICancelableToolProvider, IDisp
         {
             return _page is { IsClosed: false } ? _page : null;
         }
+    }
+
+    internal static async Task<IPage> OfflinePageAsync(IBrowser? browser)
+    {
+        if (browser is null)
+        {
+            throw new InvalidOperationException("The hidden browser did not connect.");
+        }
+
+        var context = await browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            JavaScriptEnabled = false,
+            ServiceWorkers = ServiceWorkerPolicy.Block
+        });
+        context.SetDefaultTimeout(10000);
+        await context.RouteAsync("**/*", route => route.AbortAsync());
+
+        return await context.NewPageAsync();
     }
 
     private static void CloseConnectedBrowser(IBrowser? browser)

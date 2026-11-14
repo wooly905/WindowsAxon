@@ -204,7 +204,7 @@ public sealed class WindowsWindowToolsTests
                                            "ui_close_window",
                                            new Dictionary<string, object?> { ["windowId"] = id });
         var policy = new ApprovalPolicy(catalog, [tools]);
-        policy.AllowForConversation(call.Name);
+        policy.AllowForConversation(call);
 
         var decision = policy.Decide(call);
 

@@ -47,7 +47,12 @@ public sealed class ApprovalLoop(ApprovalPolicy policy, ApprovalLedger ledger, I
 
     private async Task<bool> DecideAsync(FunctionCallContent call, CancellationToken cancellationToken)
     {
-        var decision = await Task.Run(() => policy.Decide(call), cancellationToken)
+        // Snapshot before the UI awaits so changed arguments cannot inherit the displayed approval.
+        var snapshot = new FunctionCallContent(call.CallId,
+                                              call.Name,
+                                              JsonSerializer.Deserialize<Dictionary<string, object?>>(
+                                                  JsonSerializer.Serialize(call.Arguments)));
+        var decision = await Task.Run(() => policy.Decide(snapshot), cancellationToken)
             .WaitAsync(cancellationToken);
 
         bool approved;
@@ -60,21 +65,22 @@ public sealed class ApprovalLoop(ApprovalPolicy policy, ApprovalLedger ledger, I
         else
         {
             var prompter = Prompter ?? throw new InvalidOperationException("No approval prompter is set.");
-            var answer = await prompter.AskAsync(call, decision, cancellationToken);
+            var answer = await prompter.AskAsync(snapshot, decision, cancellationToken);
             approved = answer != ApprovalAnswer.Deny;
             label = approved ? "approved" : "denied";
             if (answer == ApprovalAnswer.AllowForConversation && decision.AllowForConversation)
             {
-                policy.AllowForConversation(call.Name);
+                policy.AllowForConversation(snapshot);
             }
         }
 
-        ledger.Record(call.CallId, approved);
+        cancellationToken.ThrowIfCancellationRequested();
+        ledger.Record(snapshot, approved);
         audit.Write(new AuditEntry(DateTimeOffset.Now,
                                    "approval",
                                    ledger.CurrentRequest,
                                    call.Name,
-                                   JsonSerializer.Serialize(call.Arguments),
+                                   JsonSerializer.Serialize(snapshot.Arguments),
                                    policy.RiskOf(call.Name)?.ToString() ?? "Unknown",
                                    label,
                                    null,

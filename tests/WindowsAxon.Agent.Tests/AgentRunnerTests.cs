@@ -195,14 +195,13 @@ public class AgentRunnerTests
         var result = await runner.RunAsync("is 1.1.1.1 up?", cancellationToken: Ct);
 
         Assert.Equal(new RunResult(RunStatus.Answered, "The host answers.", 3), result);
-        Assert.Contains("<observation tool=\"net_ping\">reply from 1.1.1.1</observation>",
-                        model.Calls[2].Messages.Select(m => m.Text));
+        Assert.Contains(model.Calls[2].Messages, m => m.Text.Contains("reply from 1.1.1.1</observation>"));
         Assert.Contains(audit.Entries, e => e is { Kind: "call", Tool: "net_ping", Success: true });
         var enabled = Assert.Single(audit.Entries, e => e.Kind == "call" && e.Tool == "enable_tools");
         Assert.Contains("network", enabled.Arguments);
         Assert.False(string.IsNullOrWhiteSpace(enabled.Result));
         Assert.Contains(audit.Entries, e => e.Kind == "call_start" && e.CallId == enabled.CallId);
-        Assert.Equal(0, session.Ledger.UnapprovedCalls);
+        Assert.DoesNotContain(audit.Entries, e => e is { Kind: "call", Decision: "missing" });
     }
 
     [Fact]
@@ -226,7 +225,7 @@ public class AgentRunnerTests
         var call = Assert.Single(audit.Entries, e => e.Kind == "call" && e.Tool == "wallpaper_set");
         Assert.Equal(approval.CallId, call.CallId);
         Assert.False(string.IsNullOrEmpty(call.CallId));
-        Assert.Equal(0, session.Ledger.UnapprovedCalls);
+        Assert.DoesNotContain(audit.Entries, e => e is { Kind: "call", Decision: "missing" });
     }
 
     [Fact]
@@ -247,7 +246,7 @@ public class AgentRunnerTests
     }
 
     [Fact]
-    public async Task Allow_for_conversation_skips_the_next_card()
+    public async Task Change_actions_require_a_card_for_each_target()
     {
         var model = new ScriptedChatClient()
             .Reply(ToolStep("enable_tools", """{"group":"personalize"}"""))
@@ -259,7 +258,7 @@ public class AgentRunnerTests
 
         await runner.RunAsync("set two wallpapers", cancellationToken: Ct);
 
-        await prompter.ReceivedWithAnyArgs(1).AskAsync(default!, default!, Ct);
+        await prompter.ReceivedWithAnyArgs(2).AskAsync(default!, default!, Ct);
     }
 
     [Fact]

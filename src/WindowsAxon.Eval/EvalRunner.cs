@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Text.Json;
 using WindowsAxon.Agent;
 using WindowsAxon.Agent.Approval;
-using WindowsAxon.Agent.Audit;
 using WindowsAxon.Agent.Selection;
 using WindowsAxon.Agent.Settings;
 using WindowsAxon.Agent.Skills;
@@ -24,7 +23,8 @@ public sealed record EvalResult(string Id,
                                 double Seconds,
                                 IReadOnlyList<string> Failures,
                                 string Answer,
-                                int MainContextTokens = 0);
+                                int MainContextTokens = 0,
+                                int BlockedUnapproved = 0);
 
 public sealed record EvalSummary(int Cases,
                                  double SelectionAccuracy,
@@ -35,7 +35,8 @@ public sealed record EvalSummary(int Cases,
                                  double AverageSteps,
                                  double AverageSeconds,
                                  double AverageMainContextTokens,
-                                 IReadOnlyList<EvalResult> Results)
+                                 IReadOnlyList<EvalResult> Results,
+                                 int BlockedUnapproved = 0)
 {
     public static EvalSummary From(IReadOnlyList<EvalResult> results)
     {
@@ -55,13 +56,14 @@ public sealed record EvalSummary(int Cases,
                                results.Count == 0 ? 0 : results.Average(r => r.Steps),
                                results.Count == 0 ? 0 : results.Average(r => r.Seconds),
                                results.Count == 0 ? 0 : results.Average(r => r.MainContextTokens),
-                               results);
+                               results,
+                               results.Sum(r => r.BlockedUnapproved));
     }
 
     /// <summary>Spec Section 14.1. Time is reported but is not a gate.</summary>
     public bool PassesM1Gate(bool smallModel) =>
         SelectionAccuracy >= 0.85 && TaskSuccess >= (smallModel ? 0.65 : 0.80) && InvalidStepRate <= 0.05
-        && Unapproved == 0;
+        && Unapproved == 0 && BlockedUnapproved == 0;
 }
 
 public sealed class EvalRunner(Func<IChatClient> modelFactory,
@@ -86,7 +88,7 @@ public sealed class EvalRunner(Func<IChatClient> modelFactory,
     {
         var calls = new List<ToolCallRecord>();
         var catalog = FakeToolManifest.BuildCatalog(tools, c.ResolveMocks(evalRoot), calls);
-        var audit = new NullAuditLog();
+        var audit = new EvalAuditLog();
         var meter = new MainContextMeter(modelFactory());
         // Eval scores approval prompts, so it always uses the ask-first policy.
         var dependencies = new AgentDependencies(chat with
@@ -160,10 +162,7 @@ public sealed class EvalRunner(Func<IChatClient> modelFactory,
         bool? firstTool = expectedTools.Count == 0 ? null : names.FirstOrDefault() is { } first
             && expectedTools.Contains(first);
 
-        if (session.Ledger.UnapprovedCalls > 0)
-        {
-            failures.Add($"{session.Ledger.UnapprovedCalls} change calls ran without approval");
-        }
+        failures.AddRange(audit.Failures);
 
         return new EvalResult(c.Id,
                               failures.Count == 0,
@@ -173,11 +172,12 @@ public sealed class EvalRunner(Func<IChatClient> modelFactory,
                               session.Steps.ValidSteps,
                               session.Steps.InvalidSteps,
                               approver.Count,
-                              session.Ledger.UnapprovedCalls,
+                              audit.UnapprovedCalls,
                               stopwatch.Elapsed.TotalSeconds,
                               failures,
                               result.Text,
-                              meter.MaxTokens);
+                              meter.MaxTokens,
+                              audit.BlockedUnapprovedCalls);
     }
 
     /// <summary>ToolSelection = SubAgents: a group is selected by delegating to the agent that owns it.</summary>
@@ -246,12 +246,5 @@ public sealed class EvalRunner(Func<IChatClient> modelFactory,
     private sealed class NoExtension : IStepLimitPrompter
     {
         public Task<bool> AskToContinueAsync(int stepsUsed, CancellationToken cancellationToken) => Task.FromResult(false);
-    }
-
-    private sealed class NullAuditLog : IAuditLog
-    {
-        public void Write(AuditEntry entry)
-        {
-        }
     }
 }

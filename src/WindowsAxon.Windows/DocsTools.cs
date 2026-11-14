@@ -31,7 +31,6 @@ public sealed class DocsTools : IApprovalRule, IAsyncDisposable
     ];
 
     private McpClient? _client;
-    private bool _noticeAccepted;
 
     private async Task<McpClient> Client(CancellationToken cancellationToken)
     {
@@ -57,7 +56,6 @@ public sealed class DocsTools : IApprovalRule, IAsyncDisposable
             throw new InvalidOperationException(text);
         }
 
-        _noticeAccepted = true;
         return text;
     }
 
@@ -66,7 +64,8 @@ public sealed class DocsTools : IApprovalRule, IAsyncDisposable
           "Search Microsoft Learn technical documentation through its official MCP server. The query is sent to Microsoft.",
           policyDriven: true,
           timeoutSeconds: 60,
-          alwaysInclude: true)]
+          alwaysInclude: true,
+          outbound: true)]
     public Task<string> Search(string query, CancellationToken cancellationToken) => Call("microsoft_docs_search",
                                                                                           new()
                                                                                           {
@@ -78,7 +77,8 @@ public sealed class DocsTools : IApprovalRule, IAsyncDisposable
           "docs",
           "Fetch a Microsoft Learn article through its official MCP server. Requires an https learn.microsoft.com URL.",
           policyDriven: true,
-          timeoutSeconds: 60)]
+          timeoutSeconds: 60,
+          outbound: true)]
     public Task<string> Fetch(string url, CancellationToken cancellationToken)
     {
         var uri = BrowserTools.WebUrl(url);
@@ -99,7 +99,8 @@ public sealed class DocsTools : IApprovalRule, IAsyncDisposable
           "docs",
           "Search official Microsoft code samples through its official MCP server. The query and optional language are sent to Microsoft.",
           policyDriven: true,
-          timeoutSeconds: 60)]
+          timeoutSeconds: 60,
+          outbound: true)]
     public Task<string> SearchCode(string query,
                                    [Description("Optional. One of: csharp, javascript, typescript, python, powershell, azurecli, al, sql, java, kusto, cpp, go, rust, ruby, php. Omit to search every language.")] string? language = null,
                                    CancellationToken cancellationToken = default) =>
@@ -130,8 +131,7 @@ public sealed class DocsTools : IApprovalRule, IAsyncDisposable
 
     public bool AppliesTo(string toolName) => toolName is "docs_search" or "docs_fetch" or "docs_code_search";
 
-    public ApprovalDecision Decide(FunctionCallContent call) => _noticeAccepted
-        ? new(ApprovalOutcome.AutoApprove, false, null) : new(ApprovalOutcome.Ask,
+    public ApprovalDecision Decide(FunctionCallContent call) => new(ApprovalOutcome.Ask,
                                                               false,
                                                               "Your documentation query, code-sample query, or article URL will be sent to Microsoft Learn.");
 

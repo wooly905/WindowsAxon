@@ -269,7 +269,7 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         var result = await ShowPromptAsync("Allow this action?",
                                            $"Action: {call.Name}\n{decision.Note}\n{arguments}",
                                            "Allow",
-                                           decision.AllowForConversation ? "Allow for this conversation" : "",
+                                           decision.AllowForConversation ? "Allow this read again in this conversation" : "",
                                            "Deny",
                                            cancellationToken);
         ViewModel.AddEvent(result switch

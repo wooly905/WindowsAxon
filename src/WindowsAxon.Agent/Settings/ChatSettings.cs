@@ -25,6 +25,9 @@ public sealed record ChatSettings
 
     public int MaxActiveTools { get; init; } = 14;
 
-    /// <summary>Run every known tool without asking. Set false to ask before changes.</summary>
+    /// <summary>Auto-approve ordinary reads only. Sensitive reads and changes retain their approval policy.</summary>
     public bool AutoApproveTools { get; init; } = true;
+
+    /// <summary>Internal hosts that web lookup may read: host names, IP addresses, or CIDR ranges in private address space.</summary>
+    public List<string> AllowedPrivateHosts { get; init; } = [];
 }

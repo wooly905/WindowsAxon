@@ -76,8 +76,10 @@
   },
   {
     "name": "net_ping",
+    "outbound": true,
     "group": "network",
     "risk": "Read",
+    "policyDriven": true,
     "description": "Ping a host name or IP address.",
     "parameters": {
       "type": "object",
@@ -94,8 +96,10 @@
   },
   {
     "name": "net_dns_lookup",
+    "outbound": true,
     "group": "network",
     "risk": "Read",
+    "policyDriven": true,
     "description": "Resolve a host name.",
     "parameters": {
       "type": "object",
@@ -109,6 +113,30 @@
       ]
     },
     "output": "www.microsoft.com -> 23.45.67.89"
+  },
+  {
+    "name": "net_test_port",
+    "outbound": true,
+    "group": "network",
+    "risk": "Read",
+    "policyDriven": true,
+    "description": "Test whether a TCP port is reachable.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "host",
+        "port"
+      ]
+    },
+    "output": "www.microsoft.com:443 is reachable."
   },
   {
     "name": "settings_open",
@@ -286,6 +314,7 @@
   },
   {
     "name": "browser_open",
+    "outbound": true,
     "group": "browser",
     "risk": "Read",
     "description": "Open an http or https URL in the visible browser.",
@@ -307,6 +336,7 @@
   },
   {
     "name": "web_search",
+    "outbound": true,
     "group": "web",
     "risk": "Read",
     "policyDriven": true,
@@ -326,6 +356,7 @@
   },
   {
     "name": "web_read",
+    "outbound": true,
     "group": "web",
     "risk": "Read",
     "policyDriven": true,

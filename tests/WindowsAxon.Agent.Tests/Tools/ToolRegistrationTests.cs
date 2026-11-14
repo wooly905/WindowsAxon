@@ -6,6 +6,27 @@ public class ToolRegistrationTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
+    private sealed class OutboundProvider
+    {
+        [Tool("new_network_action", "network", "Send a request.", outbound: true)]
+        public string Send() => "sent";
+    }
+
+    [Fact]
+    public void Outbound_metadata_requires_approval_without_a_policy_rule_or_known_name()
+    {
+        var catalog = new ToolCatalog();
+        ToolRegistration.Add(catalog, new OutboundProvider());
+        var entry = catalog.Find("new_network_action")!;
+        var policy = new WindowsAxon.Agent.Approval.ApprovalPolicy(catalog, [], autoApprove: true);
+
+        Assert.True(entry.Outbound);
+        Assert.True(entry.NeedsApproval);
+        Assert.IsType<ApprovalRequiredAIFunction>(Assert.Single(catalog.BuildAgentTools(e => e.Function)));
+        Assert.Equal(WindowsAxon.Agent.Approval.ApprovalOutcome.Ask,
+            policy.Decide(new FunctionCallContent("call", entry.Name)).Outcome);
+    }
+
     private sealed class Provider : ICancelableToolProvider
     {
         public int Canceled

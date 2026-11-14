@@ -1,12 +1,14 @@
 using System.Collections.Concurrent;
+using WindowsAxon.Agent.Tools;
+using Microsoft.Extensions.AI;
 
 namespace WindowsAxon.Agent.Audit;
 
-/// <summary>Approval decisions of one session, by tool call ID.</summary>
+/// <summary>Single-use approvals bound to the request, tool, and exact arguments.</summary>
 public sealed class ApprovalLedger
 {
-    private readonly ConcurrentDictionary<string, bool> _decisions = new();
-    private int _unapproved;
+    // Providers can send empty or repeated call IDs in one turn, so the key also holds the fingerprint.
+    private readonly ConcurrentDictionary<(string CallId, string Fingerprint), bool> _decisions = new();
 
     /// <summary>The text of the request that is running, for the audit log.</summary>
     public string? CurrentRequest
@@ -14,11 +16,11 @@ public sealed class ApprovalLedger
         get; set;
     }
 
-    public int UnapprovedCalls => _unapproved;
+    public void Record(FunctionCallContent call, bool approved) =>
+        _decisions[(call.CallId ?? "", ToolCallIdentity.Fingerprint(call.Name, call.Arguments))] = approved;
 
-    public void Record(string callId, bool approved) => _decisions[callId] = approved;
+    public bool Consume(string callId, string tool, IDictionary<string, object?> arguments) =>
+        _decisions.TryRemove((callId, ToolCallIdentity.Fingerprint(tool, arguments)), out var approved) && approved;
 
-    public bool? Find(string callId) => _decisions.TryGetValue(callId, out var approved) ? approved : null;
-
-    public void CountUnapproved() => Interlocked.Increment(ref _unapproved);
+    public void Reset() => _decisions.Clear();
 }

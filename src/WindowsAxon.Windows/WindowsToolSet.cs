@@ -22,7 +22,8 @@ public sealed class WindowsToolSet : IDisposable
                           string session,
                           Func<string, nint> resolveWindow,
                           Action emergencyStop,
-                          Action<bool> inputActive)
+                          Action<bool> inputActive,
+                          IEnumerable<string>? allowedPrivateHosts = null)
     {
         var journal = new UndoJournal(Path.Combine(dataFolder, "undo"), TimeProvider.System);
         var files = new FileTools(journal, session);
@@ -34,7 +35,7 @@ public sealed class WindowsToolSet : IDisposable
         var paint = new PaintTools(ui);
         var scripts = new ScriptTools(model, dataFolder, session);
         _browser = new BrowserTools(dataFolder);
-        _web = new WebTools(dataFolder);
+        _web = new WebTools(dataFolder, allowedPrivateHosts);
         _docs = new DocsTools();
         foreach (var provider in new object[] {
             new SystemTools(),

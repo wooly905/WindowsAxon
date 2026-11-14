@@ -83,7 +83,8 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
                                           Guid.NewGuid().ToString("N"),
                                           windowTools.ResolveHandle,
                                           () => EmergencyStopRequested?.Invoke(),
-                                          active => InputActiveChanged?.Invoke(active));
+                                          active => InputActiveChanged?.Invoke(active),
+                                          Settings.Chat.AllowedPrivateHosts);
             var skillsRoot = Path.Combine(AppContext.BaseDirectory, "app-skills");
             var audit = new ToolStartAuditLog(new JsonlAuditLog(Path.Combine(DataFolder, "logs")),
                                               tool => ToolStarted?.Invoke(tool));

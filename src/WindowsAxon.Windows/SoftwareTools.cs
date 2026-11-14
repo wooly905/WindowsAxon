@@ -50,6 +50,7 @@ public sealed class SoftwareTools : IApprovalRule
     {
         var id = call.Arguments is { } arguments
             && arguments.TryGetValue("id", out var value) ? value?.ToString() ?? "" : "";
+        // The publisher and name help the user spot a look-alike package ID. ApprovalLoop runs Decide off the UI thread.
         string details;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         try

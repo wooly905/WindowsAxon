@@ -8,6 +8,34 @@ namespace WindowsAxon.Agent.Tests.Guard;
 
 public class GuardedAIFunctionTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Inactive_tools_do_not_consume_approval_or_count_as_missing_approval(bool approved)
+    {
+        var h = new Harness(_ => "ok", RiskLevel.Change, active: false);
+        var args = new AIFunctionArguments { ["x"] = "a" };
+        var audit = new WindowsAxon.Eval.EvalAuditLog();
+        var guard = new GuardedAIFunction(h.Catalog.Find("net_ping")!, h.State, h.Tracker, h.Ledger, audit);
+
+        if (approved)
+        {
+            h.Ledger.Record(new FunctionCallContent("", "net_ping", new Dictionary<string, object?> { ["x"] = "a" }), true);
+        }
+
+        Assert.Equal(GuardedAIFunction.NotEnabledMessage, await guard.InvokeAsync(args, Ct));
+        Assert.Equal(0, audit.BlockedUnapprovedCalls);
+        Assert.Equal(0, audit.UnapprovedCalls);
+        Assert.Equal(0, h.Runs);
+        h.State.Activate("group:network", ["net_ping"]);
+
+        var result = await guard.InvokeAsync(args, Ct);
+
+        Assert.Equal(approved ? "ok" : GuardedAIFunction.ApprovalRequiredMessage, result);
+        Assert.Equal(approved ? 1 : 0, h.Runs);
+        Assert.Equal(approved ? 0 : 1, audit.BlockedUnapprovedCalls);
+    }
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private sealed class Harness
@@ -205,17 +233,18 @@ public class GuardedAIFunctionTests
         var state = new ToolSelectionState(catalog, 14);
         state.Activate("group:network", ["net_ping"]);
         var ledger = new ApprovalLedger { CurrentRequest = "do it" };
+        ledger.Record(new FunctionCallContent("", "net_ping"), true);
         var audit = new ListAuditLog();
         var guard = new GuardedAIFunction(catalog.Find("net_ping")!, state, new CallTracker(), ledger, audit);
 
         var call = guard.InvokeAsync(new AIFunctionArguments(), cts.Token).AsTask();
-        await started.Task.WaitAsync(Ct);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5), Ct);
         Assert.Equal("call_start", Assert.Single(audit.Entries).Kind);
         await cts.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await call);
         var entry = Assert.Single(audit.Entries, e => e.Kind == "call");
-        Assert.Equal(("call", "net_ping", "do it", false, "missing"),
+        Assert.Equal(("call", "net_ping", "do it", false, "approved"),
                      (entry.Kind, entry.Tool, entry.Request, entry.Success, entry.Decision));
         Assert.Equal("cancelled", entry.Status);
         Assert.NotNull(entry.Error);
@@ -258,7 +287,7 @@ public class GuardedAIFunctionTests
 
         await h.Call();
 
-        Assert.Equal(1, h.Ledger.UnapprovedCalls);
+        Assert.Single(h.Audit.Entries, e => e is { Kind: "call", Decision: "missing", Status: "blocked" });
     }
 
     [Fact]

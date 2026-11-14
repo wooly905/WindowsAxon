@@ -21,6 +21,7 @@ public sealed class GuardedAIFunction(ToolEntry entry,
     public const int MaxErrorChars = 300;
     public const string NotEnabledMessage = "This tool is not enabled. Call load_skill or enable_tools first.";
     public const string RepeatMessage = "You already ran this. Use the result or select a different action.";
+    public const string ApprovalRequiredMessage = "Blocked: this action requires a fresh approval for these exact arguments.";
     private const string StoppedMessage = "Stopped: the same action was repeated 3 times.";
 
     protected override async ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments,
@@ -31,7 +32,10 @@ public sealed class GuardedAIFunction(ToolEntry entry,
         var context = FunctionInvokingChatClient.CurrentContext;
         var callId = context?.CallContent.CallId ?? "";
         var argumentsJson = JsonSerializer.Serialize(arguments.ToDictionary(a => a.Key, a => a.Value));
-        var decision = entry.NeedsApproval ? ledger.Find(callId) == true ? "approved" : "missing" : "not needed";
+        var active = state.IsActive(entry.Name);
+        var decision = !active ? "not checked" : entry.NeedsApproval
+            ? ledger.Consume(callId, entry.Name, arguments.ToDictionary(a => a.Key, a => a.Value)) ? "approved" : "missing"
+            : "not needed";
         var call = new ToolCallAudit(audit,
                                      ledger.CurrentRequest,
                                      entry.Name,
@@ -41,10 +45,17 @@ public sealed class GuardedAIFunction(ToolEntry entry,
                                      callId,
                                      trace?.Agent);
 
-        if (!state.IsActive(entry.Name))
+        if (!active)
         {
             call.Complete("blocked", false, NotEnabledMessage);
             return NotEnabledMessage;
+        }
+
+        if (decision == "missing")
+        {
+            call.Complete("blocked", false, ApprovalRequiredMessage);
+
+            return ApprovalRequiredMessage;
         }
 
         var repeat = tracker.RecordCall(entry.Name + argumentsJson);
@@ -68,14 +79,6 @@ public sealed class GuardedAIFunction(ToolEntry entry,
 
             call.Complete("blocked", false, StoppedMessage);
             return StoppedMessage;
-        }
-
-        if (entry.NeedsApproval)
-        {
-            if (decision == "missing")
-            {
-                ledger.CountUnapproved();
-            }
         }
 
         state.MarkUsed(entry.Name);

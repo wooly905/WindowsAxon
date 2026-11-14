@@ -11,7 +11,8 @@ public sealed record FakeToolSpec(string Name,
                                   bool PolicyDriven,
                                   JsonElement Parameters,
                                   string Output,
-                                  bool AlwaysInclude = false);
+                                  bool AlwaysInclude = false,
+                                  bool Outbound = false);
 
 public sealed record ToolCallRecord(string Name, IReadOnlyDictionary<string, string> Args);
 
@@ -39,7 +40,8 @@ public static class FakeToolManifest
                         spec.Group,
                         spec.Risk,
                         spec.PolicyDriven,
-                        alwaysInclude: spec.AlwaysInclude);
+                        alwaysInclude: spec.AlwaysInclude,
+                        outbound: spec.Outbound);
         }
 
         return catalog;

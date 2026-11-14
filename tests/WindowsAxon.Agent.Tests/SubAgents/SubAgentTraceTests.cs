@@ -21,10 +21,12 @@ public class SubAgentTraceTests
         var state = new ToolSelectionState(catalog, 14) { AllToolsActive = true };
         var trace = new SubAgentTrace("files");
         var audit = new ListAuditLog();
+        var ledger = new ApprovalLedger();
+        ledger.Record(new FunctionCallContent("", tool, new Dictionary<string, object?> { ["x"] = "C:\\a.txt" }), true);
         var guard = new GuardedAIFunction(catalog.Find(tool)!,
                                           state,
                                           new CallTracker(),
-                                          new ApprovalLedger(),
+                                          ledger,
                                           audit,
                                           trace);
 

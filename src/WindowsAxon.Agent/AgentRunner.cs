@@ -33,6 +33,7 @@ public sealed class AgentRunner(WindowsAxonSession session, IApprovalPrompter ap
         {
             session.Selection.StartRequest();
             session.Calls.Reset();
+            session.Ledger.Reset();
             session.Ledger.CurrentRequest = text;
         }
 
@@ -99,10 +100,12 @@ public sealed class AgentRunner(WindowsAxonSession session, IApprovalPrompter ap
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            session.Ledger.Reset();
             return new RunResult(RunStatus.Cancelled, "Stopped.", session.Selection.StepCount);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
+            session.Ledger.Reset();
             // An OperationCanceledException without the caller's token is a model-side timeout.
             var reason = ex.Message.Length > MaxReasonChars ? ex.Message[..MaxReasonChars] : ex.Message;
             return new RunResult(RunStatus.Failed,
