@@ -34,5 +34,6 @@
     <Compile Include="..\..\src\WindowsAxon.ScriptHost\HostRequest.cs" Link="ScriptHost\HostRequest.cs" />
     <Compile Include="..\..\src\WindowsAxon.ScriptHost\ScriptRunner.cs" Link="ScriptHost\ScriptRunner.cs" />
     <Compile Include="..\..\src\WindowsAxon.ScriptHost\ProcessJob.cs" Link="ScriptHost\ProcessJob.cs" />
+    <Content Include="..\..\src\WindowsAxon.App\default-mcp-servers.json" Link="default-mcp-servers.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

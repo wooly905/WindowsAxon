@@ -18,5 +18,4 @@ public sealed record AgentDependencies(ChatSettings Chat,
                                        IAuditLog Audit,
                                        IReadOnlyList<IApprovalRule> ApprovalRules,
                                        IStepLimitPrompter StepLimitPrompter,
-                                       bool DocsAvailable,
                                        IReadOnlyList<SubAgentDefinition>? ExtraAgents = null);

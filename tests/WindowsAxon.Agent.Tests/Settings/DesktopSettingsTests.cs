@@ -92,21 +92,46 @@ public sealed class DesktopSettingsTests : IDisposable
 
         using var reloaded = CreateService();
         reloaded.LoadSettings();
-        Assert.Equal(["pulsar2", "files"], reloaded.Settings.Chat.McpServers.Select(s => s.Name));
-        Assert.Equal(["-y", "server"], reloaded.Settings.Chat.McpServers[1].Args);
+        Assert.Equal(["learn", "pulsar2", "files"], reloaded.Settings.Chat.McpServers.Select(s => s.Name));
+        Assert.Equal(["-y", "server"], reloaded.Settings.Chat.McpServers[2].Args);
 
-        Assert.True(reloaded.Settings.Chat.McpServers[0].Enabled);
+        Assert.True(reloaded.Settings.Chat.McpServers[1].Enabled);
         reloaded.SetMcpServerEnabled("pulsar2", false);
         Assert.DoesNotContain("mcp_pulsar2_", string.Join(",", reloaded.ToolNames));
         using (var again = CreateService())
         {
             again.LoadSettings();
-            Assert.False(again.Settings.Chat.McpServers[0].Enabled);
-            Assert.True(again.Settings.Chat.McpServers[1].Enabled);
+            Assert.False(again.Settings.Chat.McpServers[1].Enabled);
+            Assert.True(again.Settings.Chat.McpServers[2].Enabled);
         }
 
         reloaded.DeleteMcpServer("pulsar2");
-        Assert.Equal(["files"], reloaded.Settings.Chat.McpServers.Select(s => s.Name));
+        Assert.Equal(["learn", "files"], reloaded.Settings.Chat.McpServers.Select(s => s.Name));
+    }
+
+    [Fact]
+    public void New_settings_include_the_default_mcp_servers_and_a_deleted_server_stays_deleted()
+    {
+        using var service = CreateService();
+
+        var learn = Assert.Single(service.Settings.Chat.McpServers);
+        Assert.Equal("https://learn.microsoft.com/api/mcp", learn.Url);
+        Assert.True(learn.Enabled);
+        Assert.False(learn.AutoApprove);
+        Assert.Contains("mcp_learn_microsoft_docs_search", service.ToolNames);
+        Assert.Contains("mcp_learn_microsoft_docs_fetch", service.ToolNames);
+        Assert.Contains("mcp_learn_microsoft_code_sample_search", service.ToolNames);
+
+        var path = WriteSettings("""{ "models": { "chat": { "Model": "m" } } }""");
+        using var withoutList = CreateService(path);
+        withoutList.LoadSettings();
+        Assert.Equal(["learn"], withoutList.Settings.Chat.McpServers.Select(s => s.Name));
+
+        withoutList.DeleteMcpServer("learn");
+        using var reloaded = CreateService(path);
+        reloaded.LoadSettings();
+
+        Assert.Empty(reloaded.Settings.Chat.McpServers);
     }
 
     [Fact]
@@ -124,7 +149,7 @@ public sealed class DesktopSettingsTests : IDisposable
         Assert.Throws<ArgumentException>(() => service.SaveMcpServer(new McpServerSettings { Name = "nokey", Url = "https://x/mcp" },
                                                                      null,
                                                                      "Authorization"));
-        Assert.Single(service.Settings.Chat.McpServers);
+        Assert.Equal(["learn", "pulsar"], service.Settings.Chat.McpServers.Select(s => s.Name));
     }
 
     [Fact(Skip = "Windows Credential Manager requires Windows.", SkipUnless = nameof(IsWindows))]
@@ -133,7 +158,7 @@ public sealed class DesktopSettingsTests : IDisposable
         using var service = CreateService();
         const string secret = "Bearer test-secret-not-for-json";
         service.SaveMcpServer(new McpServerSettings { Name = "secured", Url = "https://mcp.example.com/mcp" }, null, "Authorization", secret);
-        var reference = service.Settings.Chat.McpServers[0].Headers["Authorization"];
+        var reference = service.Settings.Chat.McpServers.Single(s => s.Name == "secured").Headers["Authorization"];
         var name = reference["credential:".Length..];
         _credentials.Add(name);
 
@@ -143,7 +168,7 @@ public sealed class DesktopSettingsTests : IDisposable
         service.SaveMcpServer(new McpServerSettings { Name = "secured", Url = "https://mcp.example.com/mcp", Tools = ["a"] },
                               "secured",
                               "Authorization");
-        Assert.Equal(reference, service.Settings.Chat.McpServers[0].Headers["Authorization"]);
+        Assert.Equal(reference, service.Settings.Chat.McpServers.Single(s => s.Name == "secured").Headers["Authorization"]);
 
         service.DeleteMcpServer("secured");
         Assert.Throws<InvalidOperationException>(() => _secrets.Read(name));

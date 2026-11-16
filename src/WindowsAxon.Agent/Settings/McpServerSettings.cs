@@ -8,6 +8,9 @@ public sealed partial record McpServerSettings
 {
     public const string CredentialPrefix = "credential:";
 
+    /// <summary>Every MCP tool group and sub-agent name starts with this prefix.</summary>
+    public const string GroupPrefix = "mcp_";
+
     /// <summary>Lowercase letters and digits. The tools are registered as mcp_{Name}_{tool}.</summary>
     public string Name { get; init; } = "";
 
@@ -44,7 +47,7 @@ public sealed partial record McpServerSettings
     public Dictionary<string, string> Headers { get; init; } = [];
 
     [JsonIgnore]
-    public string Group => $"mcp_{Name}";
+    public string Group => $"{GroupPrefix}{Name}";
 
     public string ToolName(string tool) => $"{Group}_{tool}";
 

@@ -270,7 +270,7 @@ public sealed class ScriptElevationTests : IDisposable
     }
 
     [Fact]
-    public void Operational_catalog_has_90_tools()
+    public void Operational_catalog_has_87_tools()
     {
         var catalog = new ToolCatalog();
         var windowTools = new WindowsAxon.App.WindowsWindowTools();
@@ -284,7 +284,7 @@ public sealed class ScriptElevationTests : IDisposable
                                                () => { },
                                                _ => { });
 
-        Assert.Equal(90, catalog.Entries.Count);
+        Assert.Equal(87, catalog.Entries.Count);
     }
 
     public void Dispose()

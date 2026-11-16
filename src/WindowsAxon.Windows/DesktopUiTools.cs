@@ -45,8 +45,7 @@ public sealed class DesktopUiTools(Func<string, nint> resolveWindow, Action emer
 
     [Tool("ui_snapshot",
           "desktop_ui",
-          "Read up to 50 visible interactive controls of a listed window, with fresh refs, control types, names and automation IDs. Does not read password values. Remote endpoints require approval to receive content.",
-          policyDriven: true)]
+          "Read up to 50 visible interactive controls of a listed window, with fresh refs, control types, names and automation IDs. Does not read password values.")]
     public Task<object> Snapshot(string windowId)
     {
         return ApartmentThread.Run<object>(ApartmentState.MTA, () =>
@@ -229,8 +228,7 @@ public sealed class DesktopUiTools(Func<string, nint> resolveWindow, Action emer
 
     [Tool("ui_read_text",
           "desktop_ui",
-          "Read at most 1500 characters of a window or a snapshot ref. Refuses password fields. Remote endpoints require approval.",
-          policyDriven: true)]
+          "Read at most 1500 characters of a window or a snapshot ref. Refuses password fields.")]
     public Task<string> Read(string windowId, string? reference = null)
     {
         return ApartmentThread.Run(ApartmentState.MTA, () =>

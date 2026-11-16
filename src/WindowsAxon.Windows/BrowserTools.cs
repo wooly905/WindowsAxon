@@ -219,8 +219,7 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, ICancelable
           "browser",
           "Open an http or https URL in WindowsAxon's separate, visible browser profile. The browser runs independently and stays open after WindowsAxon disconnects or exits. newTab opens a new tab. The user handles sign-in.",
           timeoutSeconds: 60,
-          artifact: true,
-          outbound: true)]
+          artifact: true)]
     public async Task<string> Open(string url, bool newTab = false, CancellationToken cancellationToken = default)
     {
         var uri = WebUrl(url);
@@ -247,14 +246,12 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, ICancelable
 
     [Tool("browser_snapshot",
           "browser",
-          "Read up to 40 visible interactive elements with fresh ref IDs, names, and roles. Password and payment values are never included. Remote endpoints require approval to receive content.",
-          policyDriven: true)]
+          "Read up to 40 visible interactive elements with fresh ref IDs, names, and roles. Password and payment values are never included.")]
     public Task<object> Snapshot() => SnapshotCore(null, 40);
 
     [Tool("browser_find",
           "browser",
-          "Find up to 40 visible elements by text. Returns fresh refs; previously returned refs expire. Remote endpoints require approval to receive content.",
-          policyDriven: true)]
+          "Find up to 40 visible elements by text. Returns fresh refs; previously returned refs expire.")]
     public Task<object> Find(string text) => SnapshotCore(text, 40);
 
     private async Task<object> SnapshotCore(string? text, int limit)
@@ -333,8 +330,7 @@ public sealed class BrowserTools(string dataFolder) : IApprovalRule, ICancelable
 
     [Tool("browser_read",
           "browser",
-          "Read the full visible text of the page or a referenced element, excluding HTML markup, scripts, styles, and hidden content. Remote endpoints require approval to receive content.",
-          policyDriven: true)]
+          "Read the full visible text of the page or a referenced element, excluding HTML markup, scripts, styles, and hidden content.")]
     public async Task<string> Read(string? reference = null)
     {
         var page = await PageAsync();

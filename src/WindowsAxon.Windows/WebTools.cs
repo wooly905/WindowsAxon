@@ -68,10 +68,8 @@ public sealed class WebTools(string dataFolder, IEnumerable<string>? allowedPriv
 
     [Tool("web_search",
           "web",
-          "Search the public web in a hidden browser and return up to 5 titles, URLs, and snippets. No window is shown. The hidden browser closes when the request ends. If the search is blocked or requires a CAPTCHA, ask the user before opening the visible browser. Remote endpoints require approval to receive content.",
-          policyDriven: true,
-          timeoutSeconds: 60,
-          outbound: true)]
+          "Search the public web in a hidden browser and return up to 5 titles, URLs, and snippets. No window is shown. The hidden browser closes when the request ends. If the search is blocked or requires a CAPTCHA, ask the user before opening the visible browser.",
+          timeoutSeconds: 60)]
     public async Task<string> Search(string query, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query))
@@ -106,10 +104,8 @@ public sealed class WebTools(string dataFolder, IEnumerable<string>? allowedPriv
 
     [Tool("web_read",
           "web",
-          "Read the visible text of an http or https page in a hidden browser, excluding HTML markup, scripts, styles, and hidden content. No window is shown. If the page requires sign-in or a CAPTCHA, or the site blocks automated reading, ask the user before opening the visible browser. Remote endpoints require approval to receive content.",
-          policyDriven: true,
-          timeoutSeconds: 60,
-          outbound: true)]
+          "Read the visible text of an http or https page in a hidden browser, excluding HTML markup, scripts, styles, and hidden content. No window is shown. If the page requires sign-in or a CAPTCHA, or the site blocks automated reading, ask the user before opening the visible browser.",
+          timeoutSeconds: 60)]
     public async Task<string> Read(string url, CancellationToken cancellationToken = default)
     {
         var uri = BrowserTools.WebUrl(url);

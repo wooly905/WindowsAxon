@@ -54,8 +54,7 @@ public class EvalRunnerTests
                                                                       new ChatSettings(),
                                                                       FakeToolManifest.Load(RepoPaths.File("eval/tools.json")),
                                                                       RepoPaths.File("skills"),
-                                                                      RepoPaths.File("eval"),
-                                                                      docsAvailable: false);
+                                                                      RepoPaths.File("eval"));
 
     private static string Step(string action, string args) => $$"""{"thought":"t","action":"{{action}}","args":{{args}}}""";
 
@@ -124,8 +123,7 @@ public class EvalRunnerTests
                                     new ChatSettings { ToolSelection = ToolSelectionMode.SubAgents },
                                     FakeToolManifest.Load(RepoPaths.File("eval/tools.json")),
                                     RepoPaths.File("skills"),
-                                    RepoPaths.File("eval"),
-                                    docsAvailable: false);
+                                    RepoPaths.File("eval"));
         var c = new EvalCase
         {
             Id = "t4",

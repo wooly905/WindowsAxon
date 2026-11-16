@@ -39,8 +39,7 @@ public class AgentFactoryTests
                                      skills ?? SkillCatalog.Empty,
                                      new ListAuditLog(),
                                      [],
-                                     Substitute.For<IStepLimitPrompter>(),
-                                     DocsAvailable: false);
+                                     Substitute.For<IStepLimitPrompter>());
     }
 
     [Fact]
@@ -245,27 +244,31 @@ public class AgentFactoryTests
     }
 
     [Fact]
-    public void System_prompt_has_the_docs_rule_only_when_docs_are_available()
+    public void Prompts_put_a_matching_mcp_server_before_built_in_tools_only_when_one_is_available()
     {
-        const string systemRule = "If you do not know how to do the task, use docs_search first. For an official Microsoft code sample, enable the docs group and call docs_code_search. For a full article, enable the docs group and call docs_fetch.";
-        const string orchestratorRule = "If you do not know how to do the task, use docs_search first. For an official Microsoft code sample, call docs_code_search. For a full article, call docs_fetch.";
+        const string systemRule = "Before you choose a built-in tool group, check the MCP server groups, whose names start with mcp_. If one matches the topic of the request, use its tools first. Use built-in groups, such as web, only when no MCP server matches or its tools cannot answer.";
+        const string orchestratorRule = "Before you choose another agent, check the agents whose names start with mcp_. If one matches the topic of the request, delegate to it first. Use other agents, such as web, only when no mcp_ agent matches or it cannot answer.";
 
-        Assert.Contains(systemRule, Prompts.System(docsAvailable: true));
-        Assert.Contains(systemRule, Prompts.System(docsAvailable: true, stepMode: StepMode.Native));
-        Assert.DoesNotContain("docs_code_search", Prompts.System(docsAvailable: false));
-        Assert.DoesNotContain("docs_code_search", Prompts.System(docsAvailable: false, stepMode: StepMode.Native));
-        Assert.DoesNotContain("docs_search", Prompts.System(docsAvailable: false));
-        Assert.Contains(orchestratorRule, Prompts.Orchestrator(docsAvailable: true, "- scripts: test"));
-        Assert.Contains(orchestratorRule, Prompts.Orchestrator(docsAvailable: true, "- scripts: test", StepMode.Native));
-        Assert.DoesNotContain("enable the docs group", Prompts.Orchestrator(docsAvailable: true, "- scripts: test"));
-        Assert.DoesNotContain("docs_code_search", Prompts.Orchestrator(docsAvailable: false, "- scripts: test"));
+        foreach (var mode in new[] { StepMode.Structured, StepMode.Native })
+        {
+            var system = Prompts.System(mcpAvailable: true, stepMode: mode);
+            var orchestrator = Prompts.Orchestrator(mcpAvailable: true, "- web: test", mode);
+
+            Assert.True(system.IndexOf(systemRule, StringComparison.Ordinal) is > 0 and var rule
+                        && rule < system.IndexOf("enable the web group", StringComparison.Ordinal));
+            Assert.True(orchestrator.IndexOf(orchestratorRule, StringComparison.Ordinal) is > 0 and var delegated
+                        && delegated < orchestrator.IndexOf("delegate to the web agent", StringComparison.Ordinal));
+            Assert.DoesNotContain("mcp_", Prompts.System(mcpAvailable: false, stepMode: mode));
+            Assert.DoesNotContain("mcp_", Prompts.Orchestrator(mcpAvailable: false, "- web: test", mode));
+        }
+
         Assert.Contains("{skills}", Prompts.SkillsInstruction);
     }
 
     [Fact]
     public void Native_prompt_requests_tool_calls_and_plain_text_answers()
     {
-        var prompt = Prompts.System(docsAvailable: false, stepMode: StepMode.Native);
+        var prompt = Prompts.System(mcpAvailable: false, stepMode: StepMode.Native);
 
         Assert.Contains("Use the provided tools", prompt);
         Assert.Contains("reply directly to the user", prompt);
@@ -278,8 +281,8 @@ public class AgentFactoryTests
     [Fact]
     public void System_and_orchestrator_prompts_require_powershell_before_ui_automation()
     {
-        var system = Prompts.System(docsAvailable: false);
-        var orchestrator = Prompts.Orchestrator(docsAvailable: false, "- scripts: test");
+        var system = Prompts.System(mcpAvailable: false);
+        var orchestrator = Prompts.Orchestrator(mcpAvailable: false, "- scripts: test");
 
         Assert.Contains("script_create with language 'powershell', then script_run", system);
         Assert.Contains("Do not answer with manual instructions", system);
@@ -295,8 +298,8 @@ public class AgentFactoryTests
     [Fact]
     public void Prompts_keep_web_lookup_hidden_and_browser_open_for_a_requested_page()
     {
-        var system = Prompts.System(docsAvailable: false);
-        var orchestrator = Prompts.Orchestrator(docsAvailable: false, "- web: test");
+        var system = Prompts.System(mcpAvailable: false);
+        var orchestrator = Prompts.Orchestrator(mcpAvailable: false, "- web: test");
         var web = Prompts.SubAgent(SubAgentCatalog.Find("web")!);
 
         Assert.Contains("enable the web group", system);

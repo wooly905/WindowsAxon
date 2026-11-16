@@ -3,7 +3,7 @@ using WindowsAxon.Agent.Settings;
 using WindowsAxon.Eval;
 
 // Usage: WindowsAxon.Eval --config <settings.json> [--cases eval/cases] [--tools eval/tools.json] [--skills skills]
-//        [--args-schema PerTool|Free] [--tool-selection Groups|All|SubAgents] [--docs] [--small-model]
+//        [--args-schema PerTool|Free] [--tool-selection Groups|All|SubAgents] [--small-model]
 //        [--out eval/results]
 var options = ParseArgs(args);
 if (!options.TryGetValue("config", out var configPath))
@@ -49,8 +49,7 @@ var runner = new EvalRunner(factory.CreateChatClient,
                             settings.Chat,
                             FakeToolManifest.Load(options.GetValueOrDefault("tools", "eval/tools.json")),
                             Path.GetFullPath(options.GetValueOrDefault("skills", "skills")),
-                            evalRoot,
-                            docsAvailable: options.ContainsKey("docs"));
+                            evalRoot);
 
 var cases = EvalCase.LoadFolder(options.GetValueOrDefault("cases", "eval/cases"));
 var summary = await runner.RunAllAsync(cases, cts.Token);

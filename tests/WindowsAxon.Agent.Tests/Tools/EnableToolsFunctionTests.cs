@@ -54,22 +54,17 @@ public class EnableToolsFunctionTests
     public void Extra_group_descriptions_describe_run_time_groups()
     {
         var catalog = new ToolCatalog();
+        catalog.Add(AIFunctionFactory.Create(() => "", "web_search"), "web", RiskLevel.Read);
         catalog.Add(AIFunctionFactory.Create(() => "", "mcp_pulsar_get_product"), "mcp_pulsar", RiskLevel.Change, outbound: true);
         var function = new EnableToolsFunction(catalog,
                                                new ToolSelectionState(catalog, 14),
                                                new Dictionary<string, string> { ["mcp_pulsar"] = "product data" });
 
-        Assert.Contains("mcp_pulsar: product data", function.Description);
-    }
-
-    [Fact]
-    public void Docs_group_description_mentions_code_samples()
-    {
-        var catalog = new ToolCatalog();
-        catalog.Add(AIFunctionFactory.Create(() => "", "docs_code_search"), "docs", RiskLevel.Read, policyDriven: true);
-        var function = new EnableToolsFunction(catalog, new ToolSelectionState(catalog, 14));
-
-        Assert.Contains("docs: fetch a learn.microsoft.com article and search official Microsoft code samples",
-                        function.Description);
+        Assert.Equal("Enable one tool group for this request.\n" +
+                     "MCP servers. Use one first when the request matches its topic:\n" +
+                     "mcp_pulsar: product data\n" +
+                     "Built-in groups:\n" +
+                     "web: search and read public web pages in a hidden browser; no window is shown",
+                     function.Description);
     }
 }

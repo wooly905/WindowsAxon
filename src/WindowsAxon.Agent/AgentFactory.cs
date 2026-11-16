@@ -34,9 +34,10 @@ public sealed class AgentFactory(AgentDependencies dependencies)
                                                       .ToList());
         var agents = allAgents.Where(a => toolsByAgent[a.Name].Count > 0).ToList();
         var agentList = DelegateFunction.DescribeAgents(agents, toolsByAgent);
+        var mcpAvailable = d.Catalog.Groups.Any(g => g.StartsWith(McpServerSettings.GroupPrefix, StringComparison.Ordinal));
         var fallbackPrompt = subAgents
-            ? Prompts.Orchestrator(d.DocsAvailable, agentList, StepMode.Structured)
-            : Prompts.System(d.DocsAvailable, StepMode.Structured);
+            ? Prompts.Orchestrator(mcpAvailable, agentList, StepMode.Structured)
+            : Prompts.System(mcpAvailable, StepMode.Structured);
 
         var tools = d.Catalog.BuildAgentTools(entry => new GuardedAIFunction(entry, selection, calls, ledger, d.Audit),
                                               entry => !subAgents || entry.AlwaysInclude || SubAgentCatalog.MainGroups.Contains(entry.Group))
@@ -75,8 +76,8 @@ public sealed class AgentFactory(AgentDependencies dependencies)
                 ChatOptions = new ChatOptions
                 {
                     Instructions = subAgents
-                        ? Prompts.Orchestrator(d.DocsAvailable, agentList, d.Chat.StepMode)
-                        : Prompts.System(d.DocsAvailable, d.Chat.StepMode),
+                        ? Prompts.Orchestrator(mcpAvailable, agentList, d.Chat.StepMode)
+                        : Prompts.System(mcpAvailable, d.Chat.StepMode),
                     Temperature = Temperature,
                     Tools = tools,
                 },

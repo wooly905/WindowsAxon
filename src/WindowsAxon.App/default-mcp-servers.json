@@ -1,0 +1,8 @@
+[
+  {
+    "Name": "learn",
+    "Description": "Microsoft technical documentation, such as .NET, C#, Azure, Windows, PowerShell, Microsoft 365, and SQL Server: search Microsoft Learn, fetch a learn.microsoft.com article, and search official Microsoft code samples",
+    "Url": "https://learn.microsoft.com/api/mcp",
+    "Tools": ["microsoft_docs_search", "microsoft_docs_fetch", "microsoft_code_sample_search"]
+  }
+]

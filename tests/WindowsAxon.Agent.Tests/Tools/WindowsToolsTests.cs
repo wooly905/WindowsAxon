@@ -263,10 +263,6 @@ public sealed class WindowsToolsTests : IAsyncDisposable
     [InlineData("ui_snapshot", true)]
     [InlineData("ui_screenshot", false)]
     [InlineData("ui_screenshot", true)]
-    [InlineData("web_search", false)]
-    [InlineData("web_search", true)]
-    [InlineData("web_read", false)]
-    [InlineData("web_read", true)]
     public void Snapshots_use_the_sensitive_read_approval_gate(string name, bool remote)
     {
         var catalog = new ToolCatalog();
@@ -285,16 +281,8 @@ public sealed class WindowsToolsTests : IAsyncDisposable
                                         [.. tools.ApprovalRules, new SensitiveReadRule(remote,
                                                                                        "api.example.com")]);
 
-        Assert.IsType<ApprovalRequiredAIFunction>(catalog.BuildAgentTools(entry => entry.Function)
-            .Single(tool => tool.Name == name));
         var call = new FunctionCallContent("test", name);
         var decision = policy.Decide(call);
-        if (name is "web_search" or "web_read")
-        {
-            Assert.Equal(ApprovalOutcome.Ask, decision.Outcome);
-            Assert.False(decision.AllowForConversation);
-            return;
-        }
         Assert.Equal(remote ? ApprovalOutcome.Ask : ApprovalOutcome.AutoApprove, decision.Outcome);
         Assert.Equal(remote, decision.AllowForConversation);
         if (remote)
@@ -413,6 +401,40 @@ public sealed class WindowsToolsTests : IAsyncDisposable
                      catalog.Entries.Where(e => e.Artifact).Select(e => e.Name).Order());
     }
 
+    [Theory]
+    [InlineData("web_search")]
+    [InlineData("web_read")]
+    [InlineData("net_ping")]
+    [InlineData("net_dns_lookup")]
+    [InlineData("browser_open")]
+    [InlineData("fs_read_text")]
+    [InlineData("browser_read")]
+    [InlineData("ui_read_text")]
+    [InlineData("browser_snapshot")]
+    [InlineData("browser_find")]
+    [InlineData("ui_snapshot")]
+    [InlineData("ui_screenshot")]
+    public void Lookup_tools_run_without_asking_only_when_auto_approval_is_on(string name)
+    {
+        var catalog = new ToolCatalog();
+        using var tools = new WindowsToolSet(catalog,
+                                             Substitute.For<IChatClient>(),
+                                             _folder,
+                                             "test",
+                                             _ => throw new ArgumentException("No window"),
+                                             () =>
+                                             {
+                                             },
+                                             _ =>
+                                             {
+                                             });
+        List<IApprovalRule> rules = [.. tools.ApprovalRules, new SensitiveReadRule(true, "api.example.com")];
+        var call = new FunctionCallContent("test", name, new Dictionary<string, object?> { ["url"] = "https://example.com" });
+
+        Assert.Equal(ApprovalOutcome.AutoApprove, new ApprovalPolicy(catalog, rules, autoApprove: true).Decide(call).Outcome);
+        Assert.Equal(ApprovalOutcome.Ask, new ApprovalPolicy(catalog, rules).Decide(call).Outcome);
+    }
+
     [Fact]
     public void Catalog_registers_every_planned_group_and_sensitive_actions_remain_guarded()
     {
@@ -443,8 +465,7 @@ public sealed class WindowsToolsTests : IAsyncDisposable
             "browser",
             "web",
             "desktop_ui",
-            "scripts",
-            "docs"
+            "scripts"
         })
         {
             Assert.Contains(group, catalog.Groups);
@@ -458,12 +479,7 @@ public sealed class WindowsToolsTests : IAsyncDisposable
             "winget_install",
             "script_run",
             "browser_click",
-            "ui_click",
-            "fs_read_text",
-            "browser_read",
-            "web_search",
-            "web_read",
-            "ui_read_text"
+            "ui_click"
         })
         {
             Assert.True(catalog.Find(name)!.NeedsApproval, name);
@@ -478,113 +494,6 @@ public sealed class WindowsToolsTests : IAsyncDisposable
                                                                name,
                                                                new Dictionary<string, object?>())).Outcome);
         }
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void Docs_code_sample_arguments_reject_a_blank_query(string? query)
-    {
-        var error = Assert.Throws<ArgumentException>(() => DocsTools.CodeSampleArguments(query!, null));
-
-        Assert.Equal("Query is required.", error.Message);
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void Docs_code_sample_arguments_omit_a_blank_language(string? language)
-    {
-        var arguments = DocsTools.CodeSampleArguments("  azure functions timeout  ", language);
-
-        Assert.Equal("azure functions timeout", arguments["query"]);
-        Assert.False(arguments.ContainsKey("language"));
-    }
-
-    [Theory]
-    [InlineData("PowerShell", "powershell")]
-    [InlineData("  CSharp ", "csharp")]
-    [InlineData("php", "php")]
-    public void Docs_code_sample_arguments_canonicalize_language(string language, string canonical)
-    {
-        var arguments = DocsTools.CodeSampleArguments("query", language);
-
-        Assert.Equal("query", arguments["query"]);
-        Assert.Equal(canonical, arguments["language"]);
-        Assert.Equal(2, arguments.Count);
-    }
-
-    [Theory]
-    [InlineData("C#")]
-    [InlineData(" C# ")]
-    [InlineData("python3")]
-    [InlineData("csharp, python")]
-    public void Docs_code_sample_arguments_reject_an_unknown_language(string language)
-    {
-        var error = Assert.Throws<ArgumentException>(() => DocsTools.CodeSampleArguments("query", language));
-
-        Assert.Equal("language must be one of: csharp, javascript, typescript, python, powershell, azurecli, al, sql, java, kusto, cpp, go, rust, ruby, php.",
-                     error.Message);
-    }
-
-    [Fact]
-    public void Docs_code_sample_tool_name_is_the_learn_mcp_tool() =>
-        Assert.Equal("microsoft_code_sample_search", DocsTools.CodeSampleToolName);
-
-    [Fact]
-    public async Task Docs_code_search_shares_the_learn_approval_notice()
-    {
-        await using var docs = new DocsTools();
-        var call = new FunctionCallContent("call", "docs_code_search", new Dictionary<string, object?>());
-
-        Assert.True(docs.AppliesTo("docs_search"));
-        Assert.True(docs.AppliesTo("docs_fetch"));
-        Assert.True(docs.AppliesTo("docs_code_search"));
-        Assert.False(docs.AppliesTo("microsoft_code_sample_search"));
-
-        var decision = docs.Decide(call);
-
-        Assert.Equal(ApprovalOutcome.Ask, decision.Outcome);
-        Assert.False(decision.AllowForConversation);
-        Assert.Equal("Your documentation query, code-sample query, or article URL will be sent to Microsoft Learn.", decision.Note);
-        var catalog = new ToolCatalog();
-        ToolRegistration.Add(catalog, docs);
-        var policy = new ApprovalPolicy(catalog, [docs], autoApprove: true);
-        Assert.Equal(decision.Note, policy.Decide(call).Note);
-        Assert.Equal(ApprovalOutcome.Ask, policy.Decide(call).Outcome);
-        Assert.Equal(decision, docs.Decide(new FunctionCallContent("call", "docs_search", new Dictionary<string, object?>())));
-        Assert.Equal(decision, docs.Decide(new FunctionCallContent("call", "docs_fetch", new Dictionary<string, object?>())));
-    }
-
-    [Fact]
-    public void Docs_code_search_is_registered_in_the_docs_group()
-    {
-        var catalog = new ToolCatalog();
-        using var tools = new WindowsToolSet(catalog,
-                                             Substitute.For<IChatClient>(),
-                                             _folder,
-                                             "test",
-                                             _ => throw new ArgumentException("No window"),
-                                             () =>
-                                             {
-                                             },
-                                             _ =>
-                                             {
-                                             });
-
-        var entry = catalog.Find("docs_code_search");
-
-        Assert.NotNull(entry);
-        Assert.Equal("docs", entry!.Group);
-        Assert.Equal(RiskLevel.Read, entry.Risk);
-        Assert.True(entry.PolicyDriven);
-        Assert.Equal(TimeSpan.FromSeconds(60), entry.Timeout);
-        Assert.False(entry.Artifact);
-        Assert.Equal("Search official Microsoft code samples through its official MCP server. The query and optional language are sent to Microsoft.",
-                     entry.Function.Description);
-        Assert.True(tools.ApprovalRules.OfType<DocsTools>().Single().AppliesTo("docs_code_search"));
     }
 
     private static IChatClient Writer(string code)

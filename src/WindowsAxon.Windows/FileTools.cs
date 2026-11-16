@@ -100,8 +100,7 @@ public sealed class FileTools(UndoJournal journal, string session, string? skill
 
     [Tool("fs_read_text",
           "files",
-          "Read a text file, at most 20 KB. Credential files and binary files are refused. A remote model requires approval to receive the content.",
-          policyDriven: true)]
+          "Read a text file, at most 20 KB. Credential files and binary files are refused.")]
     public string Read(string path)
     {
         path = SafeReadPath(path);

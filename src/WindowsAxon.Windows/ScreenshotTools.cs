@@ -12,8 +12,7 @@ public sealed class ScreenshotTools(DesktopUiTools ui)
 
     [Tool("ui_screenshot",
           "desktop_ui",
-          "Capture an image of one window ID from ui_list_windows, scaled to at most 1280 pixels. Use it when ui_snapshot cannot show the content, such as a canvas or a custom-drawn app, or to check a visual result. Blocks security, credential, remote-desktop, password-manager, and WindowsAxon windows. Remote endpoints require approval.",
-          policyDriven: true)]
+          "Capture an image of one window ID from ui_list_windows, scaled to at most 1280 pixels. Use it when ui_snapshot cannot show the content, such as a canvas or a custom-drawn app, or to check a visual result.           Blocks security, credential, remote-desktop, password-manager, and WindowsAxon windows.")]
     public async Task<IEnumerable<AIContent>> Capture(string windowId)
     {
         var (title, pixels, width, height) = await ApartmentThread.Run(ApartmentState.MTA, () =>

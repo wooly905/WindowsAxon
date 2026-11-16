@@ -70,8 +70,7 @@ public sealed class EvalRunner(Func<IChatClient> modelFactory,
                                ChatSettings chat,
                                IReadOnlyList<FakeToolSpec> tools,
                                string skillsRoot,
-                               string evalRoot,
-                               bool docsAvailable)
+                               string evalRoot)
 {
     public async Task<EvalSummary> RunAllAsync(IEnumerable<EvalCase> cases, CancellationToken cancellationToken)
     {
@@ -102,8 +101,7 @@ public sealed class EvalRunner(Func<IChatClient> modelFactory,
                                                                               cancellationToken),
                                                  audit,
                                                  [],
-                                                 new NoExtension(),
-                                                 docsAvailable);
+                                                 new NoExtension());
         var session = await new AgentFactory(dependencies).CreateSessionAsync(cancellationToken);
         var approver = new AutoApprover();
         var runner = new AgentRunner(session, approver, audit);

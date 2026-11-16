@@ -108,7 +108,9 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
     // Stdio MCP servers that the user allowed to start, by server, command, and arguments. Kept until the app exits.
     private readonly HashSet<string> _allowedMcpPrograms = [];
 
-    public ModelSettings Settings { get; private set; } = new();
+    public ModelSettings Settings { get; private set; } = WithDefaultMcpServers(new ModelSettings());
+
+    public static string DefaultMcpServersPath => Path.Combine(AppContext.BaseDirectory, "default-mcp-servers.json");
 
     public void LoadSettings()
     {
@@ -118,7 +120,13 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
                                                                          "settings.local.json");
         if (File.Exists(path))
         {
-            var settings = ModelSettings.Load(File.ReadAllText(path));
+            var json = File.ReadAllText(path);
+            var settings = ModelSettings.Load(json);
+            if (!HasMcpServers(json))
+            {
+                settings = WithDefaultMcpServers(settings);
+            }
+
             ValidateEndpoint(settings.ChatEndpoint.BaseUrl);
             McpServerSettings.ValidateAll(settings.Chat.McpServers);
             Settings = settings;
@@ -127,6 +135,36 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
         {
             throw new FileNotFoundException("The settings file does not exist.", path);
         }
+    }
+
+    /// <summary>A settings file without Models.Chat.McpServers gets the servers in default-mcp-servers.json. An empty list stays empty.</summary>
+    private static ModelSettings WithDefaultMcpServers(ModelSettings settings)
+    {
+        if (!File.Exists(DefaultMcpServersPath))
+        {
+            return settings;
+        }
+
+        var servers = JsonSerializer.Deserialize<List<McpServerSettings>>(File.ReadAllText(DefaultMcpServersPath),
+                                                                         new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+        return settings with { Chat = settings.Chat with { McpServers = servers } };
+    }
+
+    private static bool HasMcpServers(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        return Child(document.RootElement, "Models") is { } models
+            && Child(models, "Chat") is { } chat
+            && Child(chat, "McpServers") is not null;
+
+        // ModelSettings.Load matches property names without case.
+        static JsonElement? Child(JsonElement element, string name) =>
+            element.ValueKind == JsonValueKind.Object
+                ? element.EnumerateObject()
+                    .Where(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                    .Select(p => (JsonElement?)p.Value)
+                    .FirstOrDefault()
+                : null;
     }
 
     public async Task<RunResult> RunAsync(string text, CancellationToken cancellationToken)
@@ -171,7 +209,6 @@ appTools,
 
 ],
                                                      stepLimits,
-                                                     DocsAvailable: true,
                                                      mcpAgents);
             var session = await new AgentFactory(dependencies).CreateSessionAsync(cancellationToken);
             _runner = new AgentRunner(session, approvals, audit);

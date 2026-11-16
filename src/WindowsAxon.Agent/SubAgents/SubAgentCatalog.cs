@@ -5,8 +5,7 @@ public static class SubAgentCatalog
 {
     public static readonly IReadOnlySet<string> MainGroups = new HashSet<string>
     {
-        "utilities",
-        "docs"
+        "utilities"
     };
 
     private static readonly string[] PaintTools =

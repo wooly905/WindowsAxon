@@ -9,7 +9,6 @@ public sealed class WindowsToolSet : IDisposable
 {
     private readonly BrowserTools _browser;
     private readonly WebTools _web;
-    private readonly DocsTools _docs;
     private readonly IReadOnlyList<IApprovalRule> _rules;
     private readonly List<McpServerTools> _mcpServers = [];
 
@@ -39,7 +38,6 @@ public sealed class WindowsToolSet : IDisposable
         var scripts = new ScriptTools(model, dataFolder, session);
         _browser = new BrowserTools(dataFolder);
         _web = new WebTools(dataFolder, allowedPrivateHosts);
-        _docs = new DocsTools();
         foreach (var provider in new object[] {
             new SystemTools(),
             files,
@@ -52,15 +50,14 @@ public sealed class WindowsToolSet : IDisposable
             ui,
             new ScreenshotTools(ui),
             paint,
-            scripts,
-            _docs
+            scripts
         })
         {
             ToolRegistration.Add(catalog, provider);
         }
 
         ToolRegistration.Add(catalog, new UndoTools(journal, [files, registry, settings], session));
-        _rules = [_browser, ui, paint, scripts, software, utilities, _docs, new UndoApprovalRule(journal)];
+        _rules = [_browser, ui, paint, scripts, software, utilities, new UndoApprovalRule(journal)];
     }
 
     /// <summary>Registers the tools of a connected MCP server. Dispose closes its connection.</summary>
@@ -76,7 +73,6 @@ public sealed class WindowsToolSet : IDisposable
         Task.Run(async () =>
         {
             await _browser.DisposeAsync();
-            await _docs.DisposeAsync();
             foreach (var server in _mcpServers)
             {
                 await server.DisposeAsync();

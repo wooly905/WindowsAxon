@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using WindowsAxon.Agent.Selection;
+using WindowsAxon.Agent.Settings;
 using Microsoft.Extensions.AI;
 
 namespace WindowsAxon.Agent.Tools;
@@ -25,7 +26,6 @@ public sealed class EnableToolsFunction : AIFunction
         ["desktop_ui"] = "control an open app or Settings window (ui_snapshot, ui_click, ui_type, ui_press_keys); draw in Paint. Use when the user asks to work in a window or when a PowerShell script fails or cannot do the task",
         ["scripts"] = "write and run a PowerShell or Python script (script_create, script_run) to read or change the system when no dedicated tool can do the task; script_run elevated true only for an administrator change or when the user explicitly asks to run as administrator, which Windows asks the user to approve",
         ["utilities"] = "calculator, clipboard, undo changes",
-        ["docs"] = "fetch a learn.microsoft.com article and search official Microsoft code samples",
     };
 
     private readonly ToolCatalog _catalog;
@@ -52,8 +52,13 @@ public sealed class EnableToolsFunction : AIFunction
             ["required"] = new JsonArray("group"),
         });
 
-        Description = "Enable one tool group for this request. Groups:\n" +
-            string.Join("\n", catalog.Groups.Select(g => $"{g}: {GroupDescriptions.GetValueOrDefault(g) ?? extraDescriptions?.GetValueOrDefault(g) ?? g}"));
+        string Lines(IEnumerable<string> names) =>
+            string.Join("\n", names.Select(g => $"{g}: {GroupDescriptions.GetValueOrDefault(g) ?? extraDescriptions?.GetValueOrDefault(g) ?? g}"));
+        var mcp = catalog.Groups.Where(g => g.StartsWith(McpServerSettings.GroupPrefix, StringComparison.Ordinal)).ToList();
+        Description = mcp.Count == 0
+            ? "Enable one tool group for this request. Groups:\n" + Lines(catalog.Groups)
+            : "Enable one tool group for this request.\nMCP servers. Use one first when the request matches its topic:\n" + Lines(mcp) +
+              "\nBuilt-in groups:\n" + Lines(catalog.Groups.Except(mcp));
     }
 
     public override string Name => "enable_tools";

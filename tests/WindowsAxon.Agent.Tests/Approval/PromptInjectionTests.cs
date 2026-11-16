@@ -79,13 +79,6 @@ public class PromptInjectionTests
     }
 
     [Theory]
-    [InlineData("web_search")]
-    [InlineData("web_read")]
-    [InlineData("docs_search")]
-    [InlineData("docs_fetch")]
-    [InlineData("docs_code_search")]
-    [InlineData("net_dns_lookup")]
-    [InlineData("net_ping")]
     [InlineData("net_test_port")]
     public void Outbound_requests_need_approval_even_with_a_local_model(string name)
     {

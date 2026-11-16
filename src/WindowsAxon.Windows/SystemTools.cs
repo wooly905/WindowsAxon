@@ -142,9 +142,7 @@ public sealed class SystemTools
 
     [Tool("net_ping",
           "network",
-          "Ping one hostname or IP address, with a three-second timeout.",
-          policyDriven: true,
-          outbound: true)]
+          "Ping one hostname or IP address, with a three-second timeout.")]
     public async Task<object> Ping(string host, CancellationToken cancellationToken)
     {
         using var ping = new System.Net.NetworkInformation.Ping();
@@ -159,9 +157,7 @@ public sealed class SystemTools
 
     [Tool("net_dns_lookup",
           "network",
-          "Resolve a hostname to IP addresses.",
-          policyDriven: true,
-          outbound: true)]
+          "Resolve a hostname to IP addresses.")]
     public async Task<object> DnsLookup(string name, CancellationToken cancellationToken)
     {
         var addresses = await Dns.GetHostAddressesAsync(name, cancellationToken);

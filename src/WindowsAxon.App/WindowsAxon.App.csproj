@@ -28,6 +28,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="Assets\WindowsAxon.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="default-mcp-servers.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\skills\**\*" Link="app-skills\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="ExcludePlaywrightFromResourceIndex" BeforeTargets="_GenerateProjectPriConfigurationFiles">
