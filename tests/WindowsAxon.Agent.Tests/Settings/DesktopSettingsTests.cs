@@ -24,12 +24,137 @@ public sealed class DesktopSettingsTests : IDisposable
     [Fact]
     public void Skill_tool_names_include_the_app_window_and_shared_tools()
     {
-        var names = DesktopChatService.ToolNames;
+        using var service = CreateService();
+        var names = service.ToolNames;
 
         Assert.Contains("app_find", names);
         Assert.Contains("ui_list_windows", names);
         Assert.Contains("net_ping", names);
-        Assert.Same(names, DesktopChatService.ToolNames);
+    }
+
+    [Fact]
+    public void Skill_tool_names_include_the_listed_tools_of_each_mcp_server()
+    {
+        var path = WriteSettings("""{ "Models": { "Chat": { "McpServers": [ { "Name": "pulsar", "Url": "http://data.example:8020/mcp", "Tools": ["get_product"] } ] } } }""");
+        using var service = CreateService(path);
+        service.LoadSettings();
+
+        Assert.Contains("mcp_pulsar_get_product", service.ToolNames);
+        Assert.Contains("app_find", service.ToolNames);
+    }
+
+    [Theory]
+    [InlineData("""{ "Name": "Bad-Name", "Url": "http://data.example/mcp" }""")]
+    [InlineData("""{ "Name": "both", "Url": "http://data.example/mcp", "Command": "server.exe" }""")]
+    [InlineData("""{ "Name": "none" }""")]
+    [InlineData("""{ "Name": "plain", "Url": "https://data.example/mcp", "Headers": { "Authorization": "Bearer abc" } }""")]
+    [InlineData("""{ "Name": "remotehttp", "Url": "http://data.example/mcp", "Headers": { "Authorization": "credential:x" } }""")]
+    [InlineData("""{ "Name": "stdio", "Command": "server.exe", "Headers": { "Authorization": "credential:x" } }""")]
+    public void Load_rejects_an_invalid_mcp_server(string server)
+    {
+        var path = WriteSettings($$"""{ "Models": { "Chat": { "McpServers": [ {{server}} ] } } }""");
+        using var service = CreateService(path);
+
+        Assert.Throws<ArgumentException>(service.LoadSettings);
+    }
+
+    [Fact]
+    public void Load_rejects_two_mcp_servers_with_the_same_name()
+    {
+        var path = WriteSettings("""{ "Models": { "Chat": { "McpServers": [ { "Name": "a", "Url": "http://x/mcp" }, { "Name": "a", "Command": "s.exe" } ] } } }""");
+        using var service = CreateService(path);
+
+        Assert.Throws<ArgumentException>(service.LoadSettings);
+    }
+
+    [Fact]
+    public void Save_keeps_the_mcp_servers()
+    {
+        var path = WriteSettings("""{ "Models": { "Chat": { "McpServers": [ { "Name": "pulsar", "Url": "http://data.example:8020/mcp" } ] } } }""");
+        using var service = CreateService(path);
+        service.LoadSettings();
+
+        service.SaveSettings("http://localhost:11434/v1", "local-model");
+        using var reloaded = CreateService(path);
+        reloaded.LoadSettings();
+
+        Assert.Equal("http://data.example:8020/mcp", Assert.Single(reloaded.Settings.Chat.McpServers).Url);
+        Assert.DoesNotContain("\"Group\"", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void Mcp_server_add_rename_and_delete_persist()
+    {
+        using var service = CreateService();
+        service.SaveMcpServer(new McpServerSettings { Name = "pulsar", Url = "http://data.example:8020/mcp", Tools = ["get_product"] }, null);
+        service.SaveMcpServer(new McpServerSettings { Name = "files", Command = "npx", Args = ["-y", "server"] }, null);
+        service.SaveMcpServer(new McpServerSettings { Name = "pulsar2", Url = "http://data.example:8020/mcp" }, "pulsar");
+
+        using var reloaded = CreateService();
+        reloaded.LoadSettings();
+        Assert.Equal(["pulsar2", "files"], reloaded.Settings.Chat.McpServers.Select(s => s.Name));
+        Assert.Equal(["-y", "server"], reloaded.Settings.Chat.McpServers[1].Args);
+
+        Assert.True(reloaded.Settings.Chat.McpServers[0].Enabled);
+        reloaded.SetMcpServerEnabled("pulsar2", false);
+        Assert.DoesNotContain("mcp_pulsar2_", string.Join(",", reloaded.ToolNames));
+        using (var again = CreateService())
+        {
+            again.LoadSettings();
+            Assert.False(again.Settings.Chat.McpServers[0].Enabled);
+            Assert.True(again.Settings.Chat.McpServers[1].Enabled);
+        }
+
+        reloaded.DeleteMcpServer("pulsar2");
+        Assert.Equal(["files"], reloaded.Settings.Chat.McpServers.Select(s => s.Name));
+    }
+
+    [Fact]
+    public void Mcp_server_save_rejects_invalid_or_duplicate_servers_without_writing()
+    {
+        using var service = CreateService();
+        service.SaveMcpServer(new McpServerSettings { Name = "pulsar", Url = "http://data.example/mcp" }, null);
+
+        Assert.Throws<ArgumentException>(() => service.SaveMcpServer(new McpServerSettings { Name = "pulsar", Command = "s.exe" }, null));
+        Assert.Throws<ArgumentException>(() => service.SaveMcpServer(new McpServerSettings { Name = "Bad", Url = "http://x/mcp" }, null));
+        Assert.Throws<ArgumentException>(() => service.SaveMcpServer(new McpServerSettings { Name = "remote", Url = "http://x/mcp" },
+                                                                     null,
+                                                                     "Authorization",
+                                                                     "Bearer test"));
+        Assert.Throws<ArgumentException>(() => service.SaveMcpServer(new McpServerSettings { Name = "nokey", Url = "https://x/mcp" },
+                                                                     null,
+                                                                     "Authorization"));
+        Assert.Single(service.Settings.Chat.McpServers);
+    }
+
+    [Fact(Skip = "Windows Credential Manager requires Windows.", SkipUnless = nameof(IsWindows))]
+    public void Mcp_header_value_is_stored_as_a_credential_and_removed_with_the_server()
+    {
+        using var service = CreateService();
+        const string secret = "Bearer test-secret-not-for-json";
+        service.SaveMcpServer(new McpServerSettings { Name = "secured", Url = "https://mcp.example.com/mcp" }, null, "Authorization", secret);
+        var reference = service.Settings.Chat.McpServers[0].Headers["Authorization"];
+        var name = reference["credential:".Length..];
+        _credentials.Add(name);
+
+        Assert.DoesNotContain(secret, File.ReadAllText(Path.Combine(_folder, "settings.json")));
+        Assert.Equal(secret, _secrets.Read(name));
+
+        service.SaveMcpServer(new McpServerSettings { Name = "secured", Url = "https://mcp.example.com/mcp", Tools = ["a"] },
+                              "secured",
+                              "Authorization");
+        Assert.Equal(reference, service.Settings.Chat.McpServers[0].Headers["Authorization"]);
+
+        service.DeleteMcpServer("secured");
+        Assert.Throws<InvalidOperationException>(() => _secrets.Read(name));
+    }
+
+    private string WriteSettings(string json)
+    {
+        Directory.CreateDirectory(_folder);
+        var path = Path.Combine(_folder, "settings.json");
+        File.WriteAllText(path, json);
+        return path;
     }
 
     private DesktopChatService CreateService(string? path = null) =>

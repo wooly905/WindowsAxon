@@ -10,14 +10,13 @@ public sealed class WindowsToolSet : IDisposable
     private readonly BrowserTools _browser;
     private readonly WebTools _web;
     private readonly DocsTools _docs;
+    private readonly IReadOnlyList<IApprovalRule> _rules;
+    private readonly List<McpServerTools> _mcpServers = [];
 
     /// <summary>The personal skills folder in a data folder. New chats load skills from it.</summary>
     public static string SkillsFolder(string dataFolder) => Path.Combine(dataFolder, "skills");
 
-    public IReadOnlyList<IApprovalRule> ApprovalRules
-    {
-        get;
-    }
+    public IReadOnlyList<IApprovalRule> ApprovalRules => [.. _rules, .. _mcpServers];
 
     public WindowsToolSet(ToolCatalog catalog,
                           IChatClient model,
@@ -61,7 +60,14 @@ public sealed class WindowsToolSet : IDisposable
         }
 
         ToolRegistration.Add(catalog, new UndoTools(journal, [files, registry, settings], session));
-        ApprovalRules = [_browser, ui, paint, scripts, software, utilities, _docs, new UndoApprovalRule(journal)];
+        _rules = [_browser, ui, paint, scripts, software, utilities, _docs, new UndoApprovalRule(journal)];
+    }
+
+    /// <summary>Registers the tools of a connected MCP server. Dispose closes its connection.</summary>
+    public void AddMcpServer(ToolCatalog catalog, McpServerTools server)
+    {
+        _mcpServers.Add(server);
+        server.Register(catalog);
     }
 
     public void Dispose()
@@ -71,6 +77,10 @@ public sealed class WindowsToolSet : IDisposable
         {
             await _browser.DisposeAsync();
             await _docs.DisposeAsync();
+            foreach (var server in _mcpServers)
+            {
+                await server.DisposeAsync();
+            }
         }).GetAwaiter().GetResult();
     }
 

@@ -48,6 +48,7 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         _service.EmergencyStopRequested += () => DispatcherQueue.TryEnqueue(() => ViewModel.SendCommand.Cancel());
         _service.InputActiveChanged += active => DispatcherQueue.TryEnqueue(() => InputBanner.Visibility = active ? Visibility.Visible : Visibility.Collapsed);
         _service.ToolStarted += tool => DispatcherQueue.TryEnqueue(() => ViewModel.ShowTool(tool));
+        _service.Notice += message => DispatcherQueue.TryEnqueue(() => ViewModel.AddEvent(message));
         ViewModel.PropertyChanged += (_, e) =>
         {
             // Deferred so the x:Bind IsEnabled update re-enables the TextBox first.

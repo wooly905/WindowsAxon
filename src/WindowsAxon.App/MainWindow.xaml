@@ -83,6 +83,12 @@
                         <TextBlock Text="Skills" />
                     </StackPanel>
                 </Button>
+                <Button Click="McpServers_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" AutomationProperties.Name="MCP servers">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <FontIcon Glyph="&#xE968;" FontSize="14" />
+                        <TextBlock Text="MCP servers" />
+                    </StackPanel>
+                </Button>
                 <Button Click="Settings_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" AutomationProperties.Name="Settings">
                     <StackPanel Orientation="Horizontal" Spacing="10">
                         <FontIcon Glyph="&#xE713;" FontSize="14" />

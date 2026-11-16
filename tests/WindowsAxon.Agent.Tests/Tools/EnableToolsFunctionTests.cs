@@ -51,6 +51,18 @@ public class EnableToolsFunctionTests
     }
 
     [Fact]
+    public void Extra_group_descriptions_describe_run_time_groups()
+    {
+        var catalog = new ToolCatalog();
+        catalog.Add(AIFunctionFactory.Create(() => "", "mcp_pulsar_get_product"), "mcp_pulsar", RiskLevel.Change, outbound: true);
+        var function = new EnableToolsFunction(catalog,
+                                               new ToolSelectionState(catalog, 14),
+                                               new Dictionary<string, string> { ["mcp_pulsar"] = "product data" });
+
+        Assert.Contains("mcp_pulsar: product data", function.Description);
+    }
+
+    [Fact]
     public void Docs_group_description_mentions_code_samples()
     {
         var catalog = new ToolCatalog();

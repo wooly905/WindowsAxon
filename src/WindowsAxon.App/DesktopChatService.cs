@@ -7,6 +7,7 @@ using WindowsAxon.Agent.Audit;
 using WindowsAxon.Agent.Selection;
 using WindowsAxon.Agent.Settings;
 using WindowsAxon.Agent.Skills;
+using WindowsAxon.Agent.SubAgents;
 using WindowsAxon.Agent.Tools;
 using WindowsAxon.Windows;
 
@@ -17,6 +18,12 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
                                        string? settingsPath = null) : IDisposable
 {
     private const string ManagedCredentialPrefix = "credential:WindowsAxon/desktop/";
+    private const string McpCredentialPrefix = "WindowsAxon/mcp/";
+    private static readonly JsonSerializerOptions SettingsJsonOptions = new()
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
     private static readonly string DataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                                                              "WindowsAxon");
     private static readonly string? ConfigOverride = GetConfigOverride();
@@ -27,8 +34,11 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
 
     public static string UserSkillsFolder => WindowsToolSet.SkillsFolder(DataFolder);
 
-    /// <summary>The names of every tool that a chat registers, built once with the same code as a chat.</summary>
-    public static IReadOnlySet<string> ToolNames => KnownTools.Value;
+    private static readonly TimeSpan McpConnectTimeout = TimeSpan.FromSeconds(20);
+
+    /// <summary>The names of every tool that a chat registers: the built-in tools and the listed tools of each MCP server.</summary>
+    public IReadOnlySet<string> ToolNames =>
+        KnownTools.Value.Concat(Settings.Chat.McpServers.Where(s => s.Enabled).SelectMany(s => s.Tools.Select(s.ToolName))).ToHashSet();
 
     // PublicationOnly: a failed build is not cached, so the next call tries again.
     private static readonly Lazy<IReadOnlySet<string>> KnownTools = new(() =>
@@ -47,7 +57,7 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
         return catalog.Entries.Select(e => e.Name).ToHashSet();
     }, LazyThreadSafetyMode.PublicationOnly);
 
-    public static SkillLibrary CreateSkillLibrary() => new(BuiltInSkillsFolder, UserSkillsFolder, ToolNames);
+    public SkillLibrary CreateSkillLibrary() => new(BuiltInSkillsFolder, UserSkillsFolder, ToolNames);
 
     /// <summary>Registers every chat tool. RunAsync and ToolNames both use it, so they cannot differ.</summary>
     private static WindowsToolSet CreateTools(ToolCatalog catalog,
@@ -90,7 +100,13 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
 
     public event Action<string>? ToolStarted;
 
+    /// <summary>A message for the chat event list, for example an MCP server that did not connect.</summary>
+    public event Action<string>? Notice;
+
     private bool _forceNewRequest;
+
+    // Stdio MCP servers that the user allowed to start, by server, command, and arguments. Kept until the app exits.
+    private readonly HashSet<string> _allowedMcpPrograms = [];
 
     public ModelSettings Settings { get; private set; } = new();
 
@@ -104,6 +120,7 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
         {
             var settings = ModelSettings.Load(File.ReadAllText(path));
             ValidateEndpoint(settings.ChatEndpoint.BaseUrl);
+            McpServerSettings.ValidateAll(settings.Chat.McpServers);
             Settings = settings;
         }
         else if (settingsPath is not null || ConfigOverride is not null)
@@ -131,7 +148,8 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
                                    () => EmergencyStopRequested?.Invoke(),
                                    active => InputActiveChanged?.Invoke(active),
                                    Settings.Chat.AllowedPrivateHosts);
-            var audit = new ToolStartAuditLog(new JsonlAuditLog(Path.Combine(DataFolder, "logs")),
+            var mcpAgents = await AddMcpServersAsync(catalog, _toolSet, cancellationToken);
+            var audit =new ToolStartAuditLog(new JsonlAuditLog(Path.Combine(DataFolder, "logs")),
                                               tool => ToolStarted?.Invoke(tool));
             var toolNames = catalog.Entries.Select(e => e.Name).ToHashSet();
             // Off the UI thread: loading reads every SKILL.md.
@@ -153,7 +171,8 @@ appTools,
 
 ],
                                                      stepLimits,
-                                                     DocsAvailable: true);
+                                                     DocsAvailable: true,
+                                                     mcpAgents);
             var session = await new AgentFactory(dependencies).CreateSessionAsync(cancellationToken);
             _runner = new AgentRunner(session, approvals, audit);
         }
@@ -169,6 +188,102 @@ appTools,
         {
             _toolSet?.CloseResearchBrowser();
         }
+    }
+
+    /// <summary>Connects to the configured MCP servers in parallel and registers their tools. A server that fails is skipped.</summary>
+    private async Task<IReadOnlyList<SubAgentDefinition>> AddMcpServersAsync(ToolCatalog catalog,
+                                                                             WindowsToolSet toolSet,
+                                                                             CancellationToken cancellationToken)
+    {
+        var servers = new List<McpServerSettings>();
+        foreach (var server in Settings.Chat.McpServers.Where(s => s.Enabled))
+        {
+            if (server.Command is null || await MayStartAsync(server, cancellationToken))
+            {
+                servers.Add(server);
+            }
+            else
+            {
+                Notice?.Invoke($"MCP server '{server.Name}' was not started.");
+            }
+        }
+
+        var secrets = new WindowsSecretStore();
+        var connections = await Task.WhenAll(servers.Select(async server =>
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(McpConnectTimeout);
+            try
+            {
+                return await McpServerTools.ConnectAsync(server, secrets.Read, timeout.Token);
+            }
+            catch (Exception ex)
+            {
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    var reason = timeout.IsCancellationRequested
+                        ? $"no response in {McpConnectTimeout.TotalSeconds:0} seconds"
+                        : ex.Message;
+                    Notice?.Invoke($"MCP server '{server.Name}' did not connect: {reason}");
+                }
+                return null;
+            }
+        }));
+
+        // The tool set owns each connection from here, so a canceled run still closes it.
+        List<SubAgentDefinition> agents = [];
+        foreach (var connection in connections.OfType<McpServerTools>())
+        {
+            var server = connection.Server;
+            toolSet.AddMcpServer(catalog, connection);
+            if (connection.MissingTools.Count > 0)
+            {
+                Notice?.Invoke($"MCP server '{server.Name}' does not have these tools: {string.Join(", ", connection.MissingTools)}.");
+            }
+            agents.Add(new SubAgentDefinition(server.Group,
+                                              server.Description ?? $"tools of the {server.Name} MCP server",
+                                              [server.Group],
+                                              []));
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return agents;
+    }
+
+    /// <summary>A stdio MCP server runs a program on this computer, so the user allows it once per app session.</summary>
+    private async Task<bool> MayStartAsync(McpServerSettings server, CancellationToken cancellationToken)
+    {
+        var key = JsonSerializer.Serialize(new
+        {
+            server.Name,
+            server.Command,
+            server.Args
+        });
+        if (_allowedMcpPrograms.Contains(key))
+        {
+            return true;
+        }
+
+        var call = new FunctionCallContent($"mcp_start_{server.Name}",
+                                           "mcp_server_start",
+                                           new Dictionary<string, object?>
+                                           {
+                                               ["server"] = server.Name,
+                                               ["command"] = server.Command,
+                                               ["args"] = server.Args
+                                           });
+        var answer = await approvals.AskAsync(call,
+                                              new ApprovalDecision(ApprovalOutcome.Ask,
+                                                                   false,
+                                                                   $"WindowsAxon will start this program on this computer as MCP server '{server.Name}'. Allow it only if you trust the program."),
+                                              cancellationToken);
+        if (answer == ApprovalAnswer.Deny)
+        {
+            return false;
+        }
+
+        _allowedMcpPrograms.Add(key);
+        return true;
     }
 
     public void StartNewRequest() => _forceNewRequest = true;
@@ -250,11 +365,100 @@ appTools,
             ? null : Settings.Chat.ReasoningEffortWhenThinkingOff,
             },
         };
-        var options = new JsonSerializerOptions
+        var secrets = new WindowsSecretStore();
+        WriteSettings(updated, secrets, newCredential, apiKey);
+        NewChat();
+        EndpointFactory.ClearApiDetectionCache();
+        Settings = updated;
+        if (previousReference is not null && previousReference.StartsWith(ManagedCredentialPrefix,
+                                                                          StringComparison.Ordinal)
+            && Guid.TryParseExact(previousReference[ManagedCredentialPrefix.Length..], "N", out _)
+            && !updated.Endpoints.Values.Any(endpoint => endpoint.ApiKey == previousReference))
         {
-            WriteIndented = true,
-            Converters = { new JsonStringEnumConverter() }
+            secrets.Delete(previousReference["credential:".Length..]);
+        }
+    }
+
+    /// <summary>Saves a new or changed MCP server. The change applies to new chats.</summary>
+    /// <param name="originalName">The name of the server to replace, or null to add a server.</param>
+    /// <param name="headerName">The one secret header for an HTTP server, or blank for no header.</param>
+    /// <param name="headerValue">The header value, saved in Windows Credential Manager. Blank keeps the saved value for the same Url.</param>
+    public void SaveMcpServer(McpServerSettings server, string? originalName, string headerName = "", string headerValue = "")
+    {
+        ArgumentNullException.ThrowIfNull(server);
+
+        var previous = originalName is null ? null : Settings.Chat.McpServers.FirstOrDefault(s => s.Name == originalName);
+        headerName = headerName.Trim();
+        headerValue = headerValue.Trim();
+        if (headerValue.Contains('\0'))
+        {
+            throw new ArgumentException("The header value contains an invalid character.");
+        }
+
+        string? newCredential = null;
+        var headers = new Dictionary<string, string>();
+        if (server.Url is not null && headerName.Length > 0)
+        {
+            if (headerValue.Length > 0)
+            {
+                newCredential = $"{McpCredentialPrefix}{Guid.NewGuid():N}";
+                headers[headerName] = McpServerSettings.CredentialPrefix + newCredential;
+            }
+            else if (previous?.Url == server.Url && previous.Headers.Values.FirstOrDefault() is { } saved)
+            {
+                headers[headerName] = saved;
+            }
+            else
+            {
+                throw new ArgumentException("Enter the header value.");
+            }
+        }
+
+        var updatedServer = server with { Headers = headers };
+        var servers = Settings.Chat.McpServers.ToList();
+        var index = previous is null ? -1 : servers.IndexOf(previous);
+        if (index >= 0)
+        {
+            servers[index] = updatedServer;
+        }
+        else
+        {
+            servers.Add(updatedServer);
+        }
+
+        McpServerSettings.ValidateAll(servers);
+        SaveMcpServers(servers, newCredential, headerValue);
+    }
+
+    /// <summary>Turns a server on or off for new chats.</summary>
+    public void SetMcpServerEnabled(string name, bool enabled) =>
+        SaveMcpServers([.. Settings.Chat.McpServers.Select(s => s.Name == name ? s with { Enabled = enabled } : s)], null, null);
+
+    public void DeleteMcpServer(string name) =>
+        SaveMcpServers([.. Settings.Chat.McpServers.Where(s => s.Name != name)], null, null);
+
+    private void SaveMcpServers(List<McpServerSettings> servers, string? newCredential, string? secret)
+    {
+        var updated = Settings with
+        {
+            Chat = Settings.Chat with { McpServers = servers }
         };
+        var secrets = new WindowsSecretStore();
+        WriteSettings(updated, secrets, newCredential, secret);
+        var unused = Settings.Chat.McpServers.SelectMany(s => s.Headers.Values)
+            .Except(servers.SelectMany(s => s.Headers.Values))
+            .Select(reference => reference[McpServerSettings.CredentialPrefix.Length..])
+            .Where(name => name.StartsWith(McpCredentialPrefix, StringComparison.Ordinal));
+        Settings = updated;
+        foreach (var name in unused)
+        {
+            secrets.Delete(name);
+        }
+    }
+
+    /// <summary>Writes the settings file in one step. A new secret is written first and removed when the file write fails.</summary>
+    private void WriteSettings(ModelSettings updated, WindowsSecretStore secrets, string? newCredential, string? secret)
+    {
         var json = JsonSerializer.Serialize(new
         {
             Models = new
@@ -263,12 +467,11 @@ appTools,
                 updated.Chat
             }
         },
-                                            options);
-        var secrets = new WindowsSecretStore();
+                                            SettingsJsonOptions);
         var temporaryPath = $"{_settingsPath}.{Guid.NewGuid():N}.tmp";
         if (newCredential is not null)
         {
-            secrets.Write(newCredential, apiKey);
+            secrets.Write(newCredential, secret!);
         }
         try
         {
@@ -287,16 +490,6 @@ appTools,
         finally
         {
             File.Delete(temporaryPath);
-        }
-        NewChat();
-        EndpointFactory.ClearApiDetectionCache();
-        Settings = updated;
-        if (previousReference is not null && previousReference.StartsWith(ManagedCredentialPrefix,
-                                                                          StringComparison.Ordinal)
-            && Guid.TryParseExact(previousReference[ManagedCredentialPrefix.Length..], "N", out _)
-            && !updated.Endpoints.Values.Any(endpoint => endpoint.ApiKey == previousReference))
-        {
-            secrets.Delete(previousReference["credential:".Length..]);
         }
     }
 

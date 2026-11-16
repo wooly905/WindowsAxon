@@ -74,6 +74,26 @@ public class DelegateFunctionTests
     }
 
     [Fact]
+    public async Task Extra_agents_own_their_group_and_appear_in_delegate()
+    {
+        var catalog = new ToolCatalog();
+        catalog.Add(AIFunctionFactory.Create(() => "", "mcp_pulsar_get_product"), "mcp_pulsar", RiskLevel.Change, outbound: true);
+        var deps = AgentFactoryTests.Dependencies(new ScriptedChatClient(),
+                                                  new ChatSettings { ToolSelection = ToolSelectionMode.SubAgents },
+                                                  catalog) with
+        {
+            ExtraAgents = [new SubAgentDefinition("mcp_pulsar", "product data", ["mcp_pulsar"], [])],
+        };
+
+        var session = await new AgentFactory(deps).CreateSessionAsync(Ct);
+
+        Assert.DoesNotContain("mcp_pulsar_get_product", session.Tools.Select(t => t.Name));
+        var agents = ((AIFunction)session.Tools.Single(t => t.Name == DelegateFunction.ToolName)).JsonSchema
+            .GetProperty("properties").GetProperty("agent").GetProperty("enum").EnumerateArray().Select(e => e.GetString());
+        Assert.Contains("mcp_pulsar", agents);
+    }
+
+    [Fact]
     public async Task Sub_agent_tool_results_stay_out_of_the_main_context()
     {
         var model = new ScriptedChatClient()

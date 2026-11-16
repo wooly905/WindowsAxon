@@ -95,6 +95,57 @@ WindowsAxon loads skills once when a chat starts, so changes apply to new chats.
 
 With `ToolSelection` set to `SubAgents`, only the main agent loads skills. It writes the skill steps that a sub-agent needs into the delegated task.
 
+## MCP servers
+
+WindowsAxon can connect to external MCP servers as a client and give their tools to the agent. Select **MCP servers** in the sidebar to add, edit, and delete servers. The dialog stores a secret header value in Windows Credential Manager and manages one secret header for each server. Changes apply to new chats.
+
+Each server in the list has an on/off switch. WindowsAxon connects only to the servers that are on (`"Enabled": true`, the default) when a chat starts. A server that is off keeps its settings.
+
+The dialog writes `Models.Chat.McpServers` in `settings.json`. You can also edit this list directly:
+
+```json
+{
+  "Models": {
+    "Chat": {
+      "McpServers": [
+        {
+          "Name": "pulsar",
+          "Description": "Pulsar product data, such as product IDs and product details",
+          "Url": "http://data-server:8020/mcp",
+          "Tools": ["get_product"]
+        },
+        {
+          "Name": "files",
+          "Command": "npx",
+          "Args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\Shared"]
+        },
+        {
+          "Name": "secured",
+          "Url": "https://mcp.example.com/mcp",
+          "Headers": { "Authorization": "credential:WindowsAxon/mcp/secured" }
+        }
+      ]
+    }
+  }
+}
+```
+
+- `Name` uses lowercase letters and digits only. Each tool is registered as `mcp_<name>_<tool>` in the tool group `mcp_<name>`.
+- Set `Url` for an HTTP server (Streamable HTTP or SSE), or set `Command` and `Args` for a stdio server. Do not set both.
+- `Tools` lists the server tools to register. Leave it empty to register every tool. Many tools reduce the accuracy of small local models, so list only the tools you need.
+- `Description` tells the model when to use the server. Without it, the group is described as "tools of the `<name>` MCP server".
+- `Headers` values must be `credential:<name>` references to generic credentials in Windows Credential Manager. Do not put secrets in `settings.json`. Headers require HTTPS, except for localhost.
+
+WindowsAxon connects to the servers when a chat starts. Each server has a 20-second connection limit. A server that does not connect is skipped, and the chat shows the reason. The chat also lists names in `Tools` that the server does not have.
+
+- With `ToolSelection` set to `Groups`, the model enables `mcp_<name>` with `enable_tools`.
+- With `ToolSelection` set to `SubAgents`, each server becomes a sub-agent named `mcp_<name>`.
+- With `ToolSelection` set to `All`, the model sees the MCP tools directly.
+
+A skill can list MCP tools in `metadata.tools` by their `mcp_<name>_<tool>` names. The Skills editor accepts only the names in each server's `Tools` list.
+
+Approval: by default, every MCP tool call shows the approval card with the server and the complete arguments, even when `AutoApproveTools` is true. Select **Allow tool calls without asking** in the dialog, or set `"AutoApprove": true`, to run a server's tools without the card. This includes tools that change data, so select it only for a server you trust. A stdio server starts a program on this computer with your permissions. Before WindowsAxon starts it for the first time in an app session, it asks you to allow the command and arguments. Tool results from an MCP server go to the model endpoint, which can be remote.
+
 ## Tool catalog
 
 The operational catalog has 90 tools. `load_skill`, `read_skill_resource`, and `enable_tools` provide skill and group selection.

@@ -17,7 +17,7 @@ public sealed partial class MainWindow
         try
         {
             // The first call builds the tool set to read the tool names, so it runs off the UI thread.
-            library = await Task.Run(DesktopChatService.CreateSkillLibrary);
+            library = await Task.Run(_service.CreateSkillLibrary);
         }
         catch (Exception ex)
         {

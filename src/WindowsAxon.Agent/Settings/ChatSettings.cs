@@ -30,4 +30,7 @@ public sealed record ChatSettings
 
     /// <summary>Internal hosts that web lookup may read: host names, IP addresses, or CIDR ranges in private address space.</summary>
     public List<string> AllowedPrivateHosts { get; init; } = [];
+
+    /// <summary>External MCP servers whose tools the agent can use.</summary>
+    public List<McpServerSettings> McpServers { get; init; } = [];
 }

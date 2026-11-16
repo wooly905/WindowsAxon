@@ -32,7 +32,10 @@ public sealed class EnableToolsFunction : AIFunction
     private readonly ToolSelectionState _state;
     private readonly JsonElement _schema;
 
-    public EnableToolsFunction(ToolCatalog catalog, ToolSelectionState state)
+    /// <param name="extraDescriptions">Descriptions of groups added at run time, for example MCP servers.</param>
+    public EnableToolsFunction(ToolCatalog catalog,
+                               ToolSelectionState state,
+                               IReadOnlyDictionary<string, string>? extraDescriptions = null)
     {
         _catalog = catalog;
         _state = state;
@@ -50,7 +53,7 @@ public sealed class EnableToolsFunction : AIFunction
         });
 
         Description = "Enable one tool group for this request. Groups:\n" +
-            string.Join("\n", catalog.Groups.Select(g => $"{g}: {GroupDescriptions.GetValueOrDefault(g, g)}"));
+            string.Join("\n", catalog.Groups.Select(g => $"{g}: {GroupDescriptions.GetValueOrDefault(g) ?? extraDescriptions?.GetValueOrDefault(g) ?? g}"));
     }
 
     public override string Name => "enable_tools";

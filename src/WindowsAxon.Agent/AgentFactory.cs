@@ -26,12 +26,13 @@ public sealed class AgentFactory(AgentDependencies dependencies)
         var ledger = new ApprovalLedger();
         var policy = new ApprovalPolicy(d.Catalog, d.ApprovalRules, d.Chat.AutoApproveTools);
         var approvals = new ApprovalLoop(policy, ledger, d.Audit);
-        var toolsByAgent = SubAgentCatalog.All.ToDictionary(a => a.Name,
-                                                            a => (IReadOnlyList<string>)d.Catalog.Entries
-                                                                .Where(a.Includes)
-                                                                .Select(e => e.Name)
-                                                                .ToList());
-        var agents = SubAgentCatalog.All.Where(a => toolsByAgent[a.Name].Count > 0).ToList();
+        var allAgents = SubAgentCatalog.All.Concat(d.ExtraAgents ?? []).ToList();
+        var toolsByAgent = allAgents.ToDictionary(a => a.Name,
+                                                  a => (IReadOnlyList<string>)d.Catalog.Entries
+                                                      .Where(a.Includes)
+                                                      .Select(e => e.Name)
+                                                      .ToList());
+        var agents = allAgents.Where(a => toolsByAgent[a.Name].Count > 0).ToList();
         var agentList = DelegateFunction.DescribeAgents(agents, toolsByAgent);
         var fallbackPrompt = subAgents
             ? Prompts.Orchestrator(d.DocsAvailable, agentList, StepMode.Structured)
@@ -43,7 +44,9 @@ public sealed class AgentFactory(AgentDependencies dependencies)
 
         if (groups)
         {
-            tools.Add(new EnableToolsFunction(d.Catalog, selection));
+            tools.Add(new EnableToolsFunction(d.Catalog,
+                                              selection,
+                                              d.ExtraAgents?.ToDictionary(a => a.Name, a => a.Description)));
         }
         else if (subAgents && agents.Count > 0)
         {
