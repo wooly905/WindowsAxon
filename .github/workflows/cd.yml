@@ -23,7 +23,7 @@ jobs:
     name: Publish and release
     # Only the repo owner may release, and only from main.
     if: github.triggering_actor == 'wooly905' && github.ref == 'refs/heads/main'
-    runs-on: self-hosted
+    runs-on: windows-latest
     steps:
       - name: Require a successful CI run for this commit
         shell: pwsh

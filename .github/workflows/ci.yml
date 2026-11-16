@@ -21,7 +21,7 @@ env:
 jobs:
   build-test:
     name: Build and test
-    runs-on: self-hosted
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
 
