@@ -135,7 +135,7 @@ The dialog writes `Models.Chat.McpServers` in `settings.json`. You can also edit
 - `Name` uses lowercase letters and digits only. Each tool is registered as `mcp_<name>_<tool>` in the tool group `mcp_<name>`.
 - Set `Url` for an HTTP server (Streamable HTTP or SSE), or set `Command` and `Args` for a stdio server. Do not set both.
 - `Tools` lists the server tools to register. Leave it empty to register every tool. Many tools reduce the accuracy of small local models, so list only the tools you need.
-- `Description` tells the model when to use the server. Without it, the group is described as "tools of the `<name>` MCP server".
+- `Description` tells the model when to use the server. The **MCP servers** dialog requires it. A server in `settings.json` without it is described as "tools of the `<name>` MCP server", which gives the model little to route on.
 - `Headers` values must be `credential:<name>` references to generic credentials in Windows Credential Manager. Do not put secrets in `settings.json`. Headers require HTTPS, except for localhost.
 
 WindowsAxon connects to the servers when a chat starts. Each server has a 20-second connection limit. A server that does not connect is skipped, and the chat shows the reason. The chat also lists names in `Tools` that the server does not have.

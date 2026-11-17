@@ -79,11 +79,11 @@ public sealed partial class MainWindow
             dialog.SecondaryButtonText = "";
         }
 
-        var name = new TextBox { Header = "Name", PlaceholderText = "Lowercase letters and digits, for example pulsar" };
+        var name = new TextBox { Header = "Name", PlaceholderText = "Lowercase letters and digits, for example microsoftlearn" };
         var description = new TextBox
         {
             Header = "Description",
-            PlaceholderText = "Optional. When the model should use this server, for example product data and product IDs",
+            PlaceholderText = "Required. Describe the topics and data this server covers so the model knows when to use it, for example: Microsoft Learn documentation and code samples for Azure, .NET, Windows, and other Microsoft products",
             TextWrapping = TextWrapping.Wrap,
         };
         var transport = new ComboBox
@@ -188,11 +188,17 @@ public sealed partial class MainWindow
         dialog.PrimaryButtonClick += (_, args) =>
         {
             args.Cancel = true;
+            if (string.IsNullOrWhiteSpace(description.Text))
+            {
+                editorError.Text = "Enter a description. The model chooses an MCP server only by its name and description, so name the topics and data the server covers.";
+                return;
+            }
+
             var http = (string)transport.SelectedItem == HttpTransport;
             var server = new McpServerSettings
             {
                 Name = name.Text.Trim(),
-                Description = string.IsNullOrWhiteSpace(description.Text) ? null : description.Text.Trim(),
+                Description = description.Text.Trim(),
                 Url = http ? url.Text.Trim() : null,
                 Command = http ? null : command.Text.Trim(),
                 Args = http ? [] : Split(arguments.Text, '\r', '\n'),
