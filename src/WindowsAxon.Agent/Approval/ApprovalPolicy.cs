@@ -4,7 +4,10 @@ using Microsoft.Extensions.AI;
 namespace WindowsAxon.Agent.Approval;
 
 /// <summary>The approval gate in code. A prompt, a skill, or an observation cannot change it.</summary>
-public sealed class ApprovalPolicy(ToolCatalog catalog, IEnumerable<IApprovalRule> rules, bool autoApprove = false)
+public sealed class ApprovalPolicy(ToolCatalog catalog,
+                                  IEnumerable<IApprovalRule> rules,
+                                  bool autoApprove = false,
+                                  bool approveAll = false)
 {
     private static readonly ApprovalDecision AskEachTime = new(ApprovalOutcome.Ask, false, null);
     private static readonly ApprovalDecision Auto = new(ApprovalOutcome.AutoApprove, false, null);
@@ -14,6 +17,11 @@ public sealed class ApprovalPolicy(ToolCatalog catalog, IEnumerable<IApprovalRul
 
     public ApprovalDecision Decide(FunctionCallContent call)
     {
+        if (approveAll)
+        {
+            return Auto;
+        }
+
         var entry = catalog.Find(call.Name);
         if (entry is null)
         {

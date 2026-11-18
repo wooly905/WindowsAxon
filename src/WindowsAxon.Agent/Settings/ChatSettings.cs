@@ -31,6 +31,9 @@ public sealed record ChatSettings
     /// <summary>Auto-approve ordinary reads only. Sensitive reads and changes retain their approval policy.</summary>
     public bool AutoApproveTools { get; init; } = true;
 
+    /// <summary>Approve every tool call without asking, including changes, dangerous actions, and network requests.</summary>
+    public bool ApproveAllTools { get; init; }
+
     /// <summary>Internal hosts that web lookup may read: host names, IP addresses, or CIDR ranges in private address space.</summary>
     public List<string> AllowedPrivateHosts { get; init; } = [];
 

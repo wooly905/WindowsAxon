@@ -46,6 +46,28 @@ public class ApprovalPolicyTests
         Assert.Equal(ApprovalOutcome.Ask, Policy(autoApprove: true).Decide(Call("mystery")).Outcome);
     }
 
+    [Theory]
+    [InlineData("wallpaper_set")]
+    [InlineData("fs_delete")]
+    [InlineData("fs_read_text")]
+    [InlineData("mystery")]
+    public void Approve_all_approves_every_tool(string tool)
+    {
+        var catalog = new ToolCatalog();
+        catalog.Add(AIFunctionFactory.Create(() => "", "wallpaper_set"), "personalize", RiskLevel.Change);
+        catalog.Add(AIFunctionFactory.Create(() => "", "fs_delete"), "files", RiskLevel.Danger);
+        catalog.Add(AIFunctionFactory.Create(() => "", "fs_read_text"), "files", RiskLevel.Read, policyDriven: true);
+        var policy = new ApprovalPolicy(catalog, [new SensitiveReadRule(true, "api.example.com")], approveAll: true);
+
+        Assert.Equal(ApprovalOutcome.AutoApprove, policy.Decide(Call(tool)).Outcome);
+    }
+
+    [Fact]
+    public void Approve_all_is_off_by_default()
+    {
+        Assert.False(new WindowsAxon.Agent.Settings.ChatSettings().ApproveAllTools);
+    }
+
     [Fact]
     public void Auto_approve_is_the_default_setting()
     {

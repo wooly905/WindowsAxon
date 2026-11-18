@@ -24,7 +24,7 @@ public sealed class AgentFactory(AgentDependencies dependencies)
         var steps = new StepEvents();
         var calls = new CallTracker();
         var ledger = new ApprovalLedger();
-        var policy = new ApprovalPolicy(d.Catalog, d.ApprovalRules, d.Chat.AutoApproveTools);
+        var policy = new ApprovalPolicy(d.Catalog, d.ApprovalRules, d.Chat.AutoApproveTools, d.Chat.ApproveAllTools);
         var approvals = new ApprovalLoop(policy, ledger, d.Audit);
         var allAgents = SubAgentCatalog.All.Concat(d.ExtraAgents ?? []).ToList();
         var toolsByAgent = allAgents.ToDictionary(a => a.Name,
