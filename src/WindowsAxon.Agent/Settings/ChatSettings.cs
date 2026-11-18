@@ -18,6 +18,9 @@ public sealed record ChatSettings
         get; init;
     }
 
+    /// <summary>The reasoning_effort value sent when Thinking is true, e.g. low, medium, high. Null sends nothing.</summary>
+    public string? ReasoningEffort { get; init; }
+
     /// <summary>The reasoning_effort value sent when Thinking is false. Null sends nothing.</summary>
     public string? ReasoningEffortWhenThinkingOff { get; init; } = "none";
 

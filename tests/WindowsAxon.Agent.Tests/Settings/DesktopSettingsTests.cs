@@ -83,6 +83,19 @@ public sealed class DesktopSettingsTests : IDisposable
     }
 
     [Fact]
+    public void Reasoning_settings_persist()
+    {
+        using var service = CreateService();
+        service.SaveReasoning(true, "high");
+
+        using var reloaded = CreateService();
+        reloaded.LoadSettings();
+
+        Assert.True(reloaded.Settings.Chat.Thinking);
+        Assert.Equal("high", reloaded.Settings.Chat.ReasoningEffort);
+    }
+
+    [Fact]
     public void Mcp_server_add_rename_and_delete_persist()
     {
         using var service = CreateService();

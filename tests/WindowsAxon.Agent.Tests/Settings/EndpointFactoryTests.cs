@@ -246,9 +246,9 @@ public class EndpointFactoryTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Responses_client_posts_full_history_and_reads_text_or_tool_calls(bool toolCall)
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task Responses_client_posts_full_history_and_reads_text_or_tool_calls(bool toolCall, bool thinking)
     {
         var socket = new TcpListener(IPAddress.Loopback, 0);
         socket.Start();
@@ -265,7 +265,14 @@ public class EndpointFactoryTests
             {
                 ["e"] = new EndpointSettings { BaseUrl = $"http://localhost:{port}/v1", Api = EndpointApi.Responses },
             },
-            Chat = new ChatSettings { Endpoint = "e", Model = "gpt-6.1-sol", ReasoningEffortWhenThinkingOff = "low" },
+            Chat = new ChatSettings
+            {
+                Endpoint = "e",
+                Model = "gpt-6.1-sol",
+                Thinking = thinking,
+                ReasoningEffort = "high",
+                ReasoningEffortWhenThinkingOff = "low"
+            },
         };
         using var client = new EndpointFactory(settings, Substitute.For<ISecretStore>()).CreateChatClient();
         var options = new ChatOptions { Tools = [AIFunctionFactory.Create(() => "ok", "probe")] };
@@ -299,7 +306,7 @@ public class EndpointFactoryTests
         Assert.False(request.ContainsKey("previous_response_id"));
         Assert.Equal(3, request["input"]!.AsArray().Count);
         Assert.Equal("gpt-6.1-sol", request["model"]!.GetValue<string>());
-        Assert.Equal("low", request["reasoning"]!["effort"]!.GetValue<string>());
+        Assert.Equal(thinking ? "high" : "low", request["reasoning"]!["effort"]!.GetValue<string>());
         Assert.Equal("probe", request["tools"]![0]!["name"]!.GetValue<string>());
 
         if (toolCall)

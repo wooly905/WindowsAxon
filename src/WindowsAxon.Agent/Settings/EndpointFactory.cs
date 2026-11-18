@@ -93,10 +93,9 @@ public sealed class EndpointFactory(ModelSettings settings, ISecretStore secrets
         }
 
         var chatSettings = EffectiveChat(api, automatic);
+        var effort = chatSettings.Thinking ? chatSettings.ReasoningEffort : chatSettings.ReasoningEffortWhenThinkingOff;
 
-        return chatSettings.Thinking || chatSettings.ReasoningEffortWhenThinkingOff is null
-            ? chat
-            : new ReasoningEffortChatClient(chat, chatSettings.ReasoningEffortWhenThinkingOff);
+        return effort is null ? chat : new ReasoningEffortChatClient(chat, effort);
     }
 
     internal string? ResolveKey(EndpointSettings endpoint)
@@ -120,7 +119,7 @@ public sealed class EndpointFactory(ModelSettings settings, ISecretStore secrets
     }
 }
 
-/// <summary>Sets reasoning_effort on every request, to turn off the thinking mode of the model.</summary>
+/// <summary>Sets reasoning_effort on every request.</summary>
 public sealed class ReasoningEffortChatClient(IChatClient inner, string effort) : DelegatingChatClient(inner)
 {
     public override Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages,

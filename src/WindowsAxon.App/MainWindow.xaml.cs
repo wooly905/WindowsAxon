@@ -412,12 +412,26 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         provider.SelectedItem = endpoints.Keys.First(name => string.Equals(name,
                                                                            _service.Settings.Chat.Endpoint,
                                                                            StringComparison.OrdinalIgnoreCase));
+        var thinking = new ToggleSwitch { Header = "Thinking", IsOn = _service.Settings.Chat.Thinking };
+        const string DefaultEffort = "Model default";
+        var currentEffort = _service.Settings.Chat.ReasoningEffort ?? DefaultEffort;
+        var effort = new ComboBox
+        {
+            Header = "Reasoning effort",
+            ItemsSource = new[] { DefaultEffort, "minimal", "low", "medium", "high", currentEffort }.Distinct().ToList(),
+            SelectedItem = currentEffort,
+            IsEnabled = thinking.IsOn,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        thinking.Toggled += (_, _) => effort.IsEnabled = thinking.IsOn;
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
         var content = new StackPanel { Spacing = 12 };
         content.Children.Add(provider);
         content.Children.Add(endpoint);
         content.Children.Add(api);
         content.Children.Add(model);
+        content.Children.Add(thinking);
+        content.Children.Add(effort);
         content.Children.Add(apiKey);
         content.Children.Add(keyStatus);
         content.Children.Add(removeKey);
@@ -463,6 +477,8 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
                                       removeKey.IsChecked == true,
                                       (EndpointApi)api.SelectedItem,
                                       (string)provider.SelectedItem);
+                var selectedEffort = (string?)effort.SelectedItem;
+                _service.SaveReasoning(thinking.IsOn, selectedEffort is null or DefaultEffort ? null : selectedEffort);
                 ViewModel.SettingsChanged();
             }
             catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)

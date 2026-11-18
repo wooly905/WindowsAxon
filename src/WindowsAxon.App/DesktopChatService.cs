@@ -416,6 +416,18 @@ appTools,
         }
     }
 
+    /// <summary>Saves the thinking mode and its reasoning_effort. Null effort sends nothing.</summary>
+    public void SaveReasoning(bool thinking, string? reasoningEffort)
+    {
+        var updated = Settings with
+        {
+            Chat = Settings.Chat with { Thinking = thinking, ReasoningEffort = reasoningEffort }
+        };
+        WriteSettings(updated, new WindowsSecretStore(), null, null);
+        NewChat();
+        Settings = updated;
+    }
+
     /// <summary>Saves a new or changed MCP server. The change applies to new chats.</summary>
     /// <param name="originalName">The name of the server to replace, or null to add a server.</param>
     /// <param name="headerName">The one secret header for an HTTP server, or blank for no header.</param>
