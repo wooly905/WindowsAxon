@@ -22,6 +22,7 @@
     <PackageReference Include="CommunityToolkit.Mvvm" />
     <PackageReference Include="Markdig" />
     <ProjectReference Include="..\WindowsAxon.Agent\WindowsAxon.Agent.csproj" />
+    <ProjectReference Include="..\WindowsAxon.Mesh\WindowsAxon.Mesh.csproj" />
     <ProjectReference Include="..\WindowsAxon.Windows\WindowsAxon.Windows.csproj" />
     <!-- Build order only; the elevated host must never load in the app process. -->
     <ProjectReference Include="..\WindowsAxon.ScriptHost\WindowsAxon.ScriptHost.csproj" ReferenceOutputAssembly="false" Private="false" />

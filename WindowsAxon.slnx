@@ -2,6 +2,8 @@
   <Folder Name="/src/">
     <Project Path="src/WindowsAxon.Agent/WindowsAxon.Agent.csproj" />
     <Project Path="src/WindowsAxon.App/WindowsAxon.App.csproj" />
+    <Project Path="src/WindowsAxon.Hub/WindowsAxon.Hub.csproj" />
+    <Project Path="src/WindowsAxon.Mesh/WindowsAxon.Mesh.csproj" />
     <Project Path="src/WindowsAxon.Windows/WindowsAxon.Windows.csproj" />
     <Project Path="src/WindowsAxon.Eval/WindowsAxon.Eval.csproj" />
     <Project Path="src/WindowsAxon.ScriptHost/WindowsAxon.ScriptHost.csproj" />

@@ -150,6 +150,25 @@ A skill can list MCP tools in `metadata.tools` by their `mcp_<name>_<tool>` name
 
 Approval: by default, every MCP tool call shows the approval card with the server and the complete arguments, even when `AutoApproveTools` is true. Select **Allow tool calls without asking** in the dialog, or set `"AutoApprove": true`, to run a server's tools without the card. This includes tools that change data, so select it only for a server you trust. A stdio server starts a program on this computer with your permissions. Before WindowsAxon starts it for the first time in an app session, it asks you to allow the command and arguments. Tool results from an MCP server go to the model endpoint, which can be remote.
 
+## Distributed mode (Network)
+
+Multiple computers running WindowsAxon can communicate across subnets and routers through a central WebSocket relay, `WindowsAxon.Hub`. Only the hub host needs an open inbound port; each WindowsAxon client opens an outbound WebSocket connection to `/ws`.
+
+Start the hub from the repository root (listens on `http://0.0.0.0:5250` by default):
+
+```powershell
+$env:WINDOWSAXON_HUB_TOKEN = "your-secret-token"
+dotnet run --project src/WindowsAxon.Hub
+```
+
+- Set `WINDOWSAXON_HUB_TOKEN` (or `Hub:Token` in `src/WindowsAxon.Hub/appsettings.json`) to require `Authorization: Bearer <token>` on `/ws`. Leave it empty only for local testing.
+- Pass `--urls "http://0.0.0.0:8080"` to listen on a different port. `GET /health` reports `status` and `onlineNodes`.
+- In each WindowsAxon desktop app, select **Network** in the sidebar, enable distributed mode, enter the Hub URL (for example `ws://192.168.1.10:5250/ws` or `wss://hub.example.com/ws`), set this computer's name (defaults to the Windows machine name), and enter the hub token. The token is stored in Windows Credential Manager and referenced as `credential:WindowsAxon/mesh/...` under `Models.Chat.Mesh` in `settings.json`.
+- Connected computers appear in the **Online computers** section of the sidebar. Select a computer to insert `@<name> ` into the input box, or type a request starting with `@<name>` (for example `@Computer B, show me your harddrive free space`).
+- The target computer runs the request in an isolated agent session and displays the incoming message (`From <caller>`), tool calls, and answer (`Reply to <caller>`) in its chat view.
+- Tool calls that require approval on the target computer forward their approval card back to the calling computer (`[Remote: <target>]`). Clicking **Stop** or disconnecting cancels execution on the target computer.
+- Node names must be unique per hub. Presence updates in real time on connect, disconnect, and 20-second WebSocket keep-alive heartbeats.
+
 ## Tool catalog
 
 The operational catalog has 87 tools. `load_skill`, `read_skill_resource`, and `enable_tools` provide skill and group selection.

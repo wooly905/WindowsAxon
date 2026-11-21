@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="..\WindowsAxon.Mesh\WindowsAxon.Mesh.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="WindowsAxon.Agent.Tests" />
+  </ItemGroup>
+</Project>
+

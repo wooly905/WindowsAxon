@@ -14,6 +14,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\WindowsAxon.Agent\WindowsAxon.Agent.csproj" />
+    <ProjectReference Include="..\..\src\WindowsAxon.Hub\WindowsAxon.Hub.csproj" />
+    <ProjectReference Include="..\..\src\WindowsAxon.Mesh\WindowsAxon.Mesh.csproj" />
     <ProjectReference Include="..\..\src\WindowsAxon.Windows\WindowsAxon.Windows.csproj" />
     <ProjectReference Include="..\..\src\WindowsAxon.Eval\WindowsAxon.Eval.csproj" />
   </ItemGroup>

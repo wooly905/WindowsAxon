@@ -38,6 +38,7 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         try
         {
             _service.LoadSettings();
+            _service.StartMesh();
         }
         catch (Exception)
         {
@@ -49,6 +50,11 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         _service.InputActiveChanged += active => DispatcherQueue.TryEnqueue(() => InputBanner.Visibility = active ? Visibility.Visible : Visibility.Collapsed);
         _service.ToolStarted += tool => DispatcherQueue.TryEnqueue(() => ViewModel.ShowTool(tool));
         _service.Notice += message => DispatcherQueue.TryEnqueue(() => ViewModel.AddEvent(message));
+        _service.PeersChanged += peers => DispatcherQueue.TryEnqueue(() => RefreshOnlinePeers(peers));
+        _service.MeshStateChanged += (_, _) => DispatcherQueue.TryEnqueue(RefreshMeshStatus);
+        _service.RemoteRequestReceived += (caller, prompt) => DispatcherQueue.TryEnqueue(() => ViewModel.ShowRemoteRequest(caller, prompt));
+        _service.RemoteToolStarted += (caller, tool) => DispatcherQueue.TryEnqueue(() => ViewModel.ShowRemoteTool(caller, tool));
+        _service.RemoteResponseSent += (caller, status, text) => DispatcherQueue.TryEnqueue(() => ViewModel.ShowRemoteResponse(caller, status, text));
         ViewModel.PropertyChanged += (_, e) =>
         {
             // Deferred so the x:Bind IsEnabled update re-enables the TextBox first.
@@ -63,6 +69,8 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         }
 
         InitializeComponent();
+        RefreshOnlinePeers(_service.OnlinePeers);
+        RefreshMeshStatus();
         ConversationList.ItemsSource = new CollectionViewSource
         {
             IsSourceGrouped = true,
@@ -262,9 +270,41 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         }
     }
 
-    public async Task<ApprovalAnswer> AskAsync(FunctionCallContent call,
-                                               ApprovalDecision decision,
-                                               CancellationToken cancellationToken)
+    public Task<ApprovalAnswer> AskAsync(FunctionCallContent call,
+                                         ApprovalDecision decision,
+                                         CancellationToken cancellationToken)
+    {
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            return AskOnUiThreadAsync(call, decision, cancellationToken);
+        }
+
+        var tcs = new TaskCompletionSource<ApprovalAnswer>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!DispatcherQueue.TryEnqueue(async () =>
+            {
+                try
+                {
+                    tcs.TrySetResult(await AskOnUiThreadAsync(call, decision, cancellationToken));
+                }
+                catch (OperationCanceledException ex)
+                {
+                    tcs.TrySetCanceled(ex.CancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+            }))
+        {
+            tcs.TrySetResult(ApprovalAnswer.Deny);
+        }
+
+        return tcs.Task;
+    }
+
+    private async Task<ApprovalAnswer> AskOnUiThreadAsync(FunctionCallContent call,
+                                                          ApprovalDecision decision,
+                                                          CancellationToken cancellationToken)
     {
         var arguments = JsonSerializer.Serialize(call.Arguments, new JsonSerializerOptions { WriteIndented = true });
         var result = await ShowPromptAsync("Allow this action?",

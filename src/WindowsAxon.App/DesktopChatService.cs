@@ -9,6 +9,7 @@ using WindowsAxon.Agent.Settings;
 using WindowsAxon.Agent.Skills;
 using WindowsAxon.Agent.SubAgents;
 using WindowsAxon.Agent.Tools;
+using WindowsAxon.Mesh;
 using WindowsAxon.Windows;
 
 namespace WindowsAxon.App;
@@ -19,6 +20,7 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
 {
     private const string ManagedCredentialPrefix = "credential:WindowsAxon/desktop/";
     private const string McpCredentialPrefix = "WindowsAxon/mcp/";
+    private const string MeshCredentialPrefix = "WindowsAxon/mesh/";
     private static readonly JsonSerializerOptions SettingsJsonOptions = new()
     {
         WriteIndented = true,
@@ -93,6 +95,7 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
     private IChatClient? _model;
     private AgentRunner? _runner;
     private WindowsToolSet? _toolSet;
+    private MeshClient? _meshClient;
 
     public event Action? EmergencyStopRequested;
 
@@ -102,6 +105,22 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
 
     /// <summary>A message for the chat event list, for example an MCP server that did not connect.</summary>
     public event Action<string>? Notice;
+
+    public event Action<IReadOnlyList<string>>? PeersChanged;
+
+    public event Action<MeshConnectionState, string>? MeshStateChanged;
+
+    public event Action<string, string>? RemoteRequestReceived;
+
+    public event Action<string, string>? RemoteToolStarted;
+
+    public event Action<string, RunStatus, string>? RemoteResponseSent;
+
+    public IReadOnlyList<string> OnlinePeers => _meshClient?.OnlinePeers ?? [];
+
+    public MeshConnectionState MeshState => _meshClient?.State ?? MeshConnectionState.Disconnected;
+
+    public string MeshStatusMessage => _meshClient?.StatusMessage ?? (Settings.Chat.Mesh.Enabled ? "Disconnected" : "Disabled");
 
     private bool _forceNewRequest;
 
@@ -129,6 +148,7 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
 
             ValidateEndpoint(settings.ChatEndpoint.BaseUrl);
             McpServerSettings.ValidateAll(settings.Chat.McpServers);
+            settings.Chat.Mesh.Validate();
             Settings = settings;
         }
         else if (settingsPath is not null || ConfigOverride is not null)
@@ -169,6 +189,24 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
 
     public async Task<RunResult> RunAsync(string text, CancellationToken cancellationToken)
     {
+        if (Settings.Chat.Mesh.Enabled
+            && PeerMentionParser.TryParse(text, OnlinePeers, out var targetNode, out var remotePrompt))
+        {
+            if (string.IsNullOrWhiteSpace(remotePrompt))
+            {
+                return new RunResult(RunStatus.Failed, $"Enter a request after @{targetNode}.", 0);
+            }
+
+            if (string.Equals(targetNode, Settings.Chat.Mesh.EffectiveNodeName, StringComparison.OrdinalIgnoreCase))
+            {
+                text = remotePrompt;
+            }
+            else
+            {
+                return await RunOnRemotePeerAsync(targetNode, remotePrompt, cancellationToken);
+            }
+        }
+
         if (_runner is null)
         {
             _toolSet?.Dispose();
@@ -553,7 +591,264 @@ appTools,
         }
     }
 
-    public void Dispose() => NewChat();
+    public void StartMesh()
+    {
+        StopMesh();
+        var mesh = Settings.Chat.Mesh;
+        if (!mesh.Enabled || string.IsNullOrWhiteSpace(mesh.HubUrl))
+        {
+            MeshStateChanged?.Invoke(MeshConnectionState.Disconnected, "Disabled");
+            PeersChanged?.Invoke([]);
+            return;
+        }
+
+        mesh.Validate();
+        var secrets = new WindowsSecretStore();
+        var token = !string.IsNullOrEmpty(mesh.Token) && mesh.Token.StartsWith(MeshSettings.CredentialPrefix, StringComparison.Ordinal)
+            ? secrets.Read(mesh.Token[MeshSettings.CredentialPrefix.Length..])
+            : null;
+        var client = new MeshClient(new Uri(mesh.HubUrl.Trim()),
+                                    mesh.EffectiveNodeName,
+                                    token,
+                                    HandleIncomingRemoteTaskAsync);
+        client.PeersChanged += peers => PeersChanged?.Invoke(peers);
+        client.ConnectionStateChanged += (state, message) => MeshStateChanged?.Invoke(state, message);
+        _meshClient = client;
+        client.Start();
+    }
+
+    public void StopMesh()
+    {
+        var previous = Interlocked.Exchange(ref _meshClient, null);
+        if (previous is not null)
+        {
+            _ = previous.DisposeAsync();
+        }
+    }
+
+    public void SaveMeshSettings(bool enabled,
+                                 string hubUrl,
+                                 string nodeName,
+                                 string token = "",
+                                 bool removeToken = false)
+    {
+        hubUrl = hubUrl.Trim();
+        nodeName = nodeName.Trim();
+        token = token.Trim();
+        if (token.Contains('\0'))
+        {
+            throw new ArgumentException("The hub token contains an invalid character.");
+        }
+
+        var previous = Settings.Chat.Mesh;
+        var previousReference = previous.Token;
+        var reference = !removeToken && string.Equals(previous.HubUrl.Trim(), hubUrl, StringComparison.OrdinalIgnoreCase)
+            ? previousReference
+            : null;
+        string? newCredential = null;
+        if (!removeToken && token.Length > 0)
+        {
+            newCredential = $"{MeshCredentialPrefix}{Guid.NewGuid():N}";
+            reference = MeshSettings.CredentialPrefix + newCredential;
+        }
+
+        var updatedMesh = new MeshSettings
+        {
+            Enabled = enabled,
+            HubUrl = hubUrl,
+            NodeName = nodeName,
+            Token = reference,
+        };
+        updatedMesh.Validate();
+
+        var updated = Settings with
+        {
+            Chat = Settings.Chat with { Mesh = updatedMesh }
+        };
+        var secrets = new WindowsSecretStore();
+        WriteSettings(updated, secrets, newCredential, token);
+        Settings = updated;
+
+        if (previousReference is not null
+            && previousReference != reference
+            && previousReference.StartsWith(MeshSettings.CredentialPrefix + MeshCredentialPrefix, StringComparison.Ordinal))
+        {
+            secrets.Delete(previousReference[MeshSettings.CredentialPrefix.Length..]);
+        }
+
+        StartMesh();
+    }
+
+    private async Task<RunResult> RunOnRemotePeerAsync(string targetNode, string prompt, CancellationToken cancellationToken)
+    {
+        var client = _meshClient;
+        if (client is null || client.State != MeshConnectionState.Connected)
+        {
+            return new RunResult(RunStatus.Failed,
+                                 $"Not connected to mesh hub ({MeshStatusMessage}). Open Network in the sidebar to check settings.",
+                                 0);
+        }
+
+        var result = await client.RunRemoteTaskAsync(targetNode,
+                                                     prompt,
+                                                     tool => ToolStarted?.Invoke($"[{targetNode}] {tool}"),
+                                                     (req, ct) => AskRemoteApprovalAsync(targetNode, req, ct),
+                                                     cancellationToken);
+        return new RunResult(MapRunStatus(result.Status), result.Text, result.Steps);
+    }
+
+    private async Task<RemoteApprovalAnswer> AskRemoteApprovalAsync(string targetNode,
+                                                                    TaskApprovalRequestPayload req,
+                                                                    CancellationToken cancellationToken)
+    {
+        Dictionary<string, object?>? args = null;
+        if (!string.IsNullOrWhiteSpace(req.ArgumentsJson))
+        {
+            try
+            {
+                args = JsonSerializer.Deserialize<Dictionary<string, object?>>(req.ArgumentsJson);
+            }
+            catch (JsonException)
+            {
+                args = new Dictionary<string, object?> { ["raw"] = req.ArgumentsJson };
+            }
+        }
+
+        var call = new FunctionCallContent(req.ApprovalId, $"[{targetNode}] {req.ToolName}", args);
+        var note = string.IsNullOrWhiteSpace(req.Note)
+            ? $"Remote computer '{targetNode}' requests approval to run '{req.ToolName}'."
+            : $"[Remote: {targetNode}] {req.Note}";
+        var answer = await approvals.AskAsync(call,
+                                              new ApprovalDecision(ApprovalOutcome.Ask, req.AllowForConversation, note),
+                                              cancellationToken);
+        return answer switch
+        {
+            ApprovalAnswer.Allow => RemoteApprovalAnswer.Allow,
+            ApprovalAnswer.AllowForConversation => RemoteApprovalAnswer.AllowForConversation,
+            _ => RemoteApprovalAnswer.Deny,
+        };
+    }
+
+    private async Task<RemoteTaskResult> HandleIncomingRemoteTaskAsync(IncomingRemoteTask task,
+                                                                       CancellationToken cancellationToken)
+    {
+        RemoteRequestReceived?.Invoke(task.CallerNode, task.Prompt);
+        try
+        {
+            var factory = await new EndpointFactory(Settings, new WindowsSecretStore()).ResolveAsync(cancellationToken);
+            using var model = factory.CreateChatClient();
+            var appTools = new WindowsAppTools();
+            var windowTools = new WindowsWindowTools();
+            var catalog = new ToolCatalog();
+            using var toolSet = CreateTools(catalog,
+                                            appTools,
+                                            windowTools,
+                                            model,
+                                            $"remote-{task.TaskId}",
+                                            () => { },
+                                            _ => { },
+                                            Settings.Chat.AllowedPrivateHosts);
+            var audit = new ToolStartAuditLog(new JsonlAuditLog(Path.Combine(DataFolder, "logs")),
+                                              tool =>
+                                              {
+                                                  task.ReportToolStarted(tool);
+                                                  RemoteToolStarted?.Invoke(task.CallerNode, tool);
+                                              });
+            var toolNames = catalog.Entries.Select(e => e.Name).ToHashSet();
+            var skills = await Task.Run(() => SkillCatalog.LoadAsync([(BuiltInSkillsFolder, true), (UserSkillsFolder, false)],
+                                                                     toolNames,
+                                                                     cancellationToken),
+                                        cancellationToken);
+            var dependencies = new AgentDependencies(factory.Settings.Chat,
+                                                     model,
+                                                     catalog,
+                                                     skills,
+                                                     audit,
+                                                     [
+                                                         appTools,
+                                                         windowTools,
+                                                         .. toolSet.ApprovalRules,
+                                                         new SensitiveReadRule(Settings.IsChatRemote,
+                                                                               new Uri(Settings.ChatEndpoint.BaseUrl).Host)
+                                                     ],
+                                                     new RemoteStepLimitPrompter(),
+                                                     []);
+            var session = await new AgentFactory(dependencies).CreateSessionAsync(cancellationToken);
+            var runner = new AgentRunner(session, new RemoteApprovalPrompter(task), audit);
+            using var stop = cancellationToken.Register(() => toolSet.StopBrowser());
+            try
+            {
+                var result = await runner.RunAsync(task.Prompt, forceNewRequest: true, cancellationToken: cancellationToken);
+                RemoteResponseSent?.Invoke(task.CallerNode, result.Status, result.Text);
+                return new RemoteTaskResult(MapRemoteStatus(result.Status), result.Text, result.Steps);
+            }
+            finally
+            {
+                toolSet.CloseResearchBrowser();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            RemoteResponseSent?.Invoke(task.CallerNode, RunStatus.Cancelled, "Stopped.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            RemoteResponseSent?.Invoke(task.CallerNode, RunStatus.Failed, ex.Message);
+            throw;
+        }
+    }
+
+    private static RunStatus MapRunStatus(RemoteRunStatus status) => status switch
+    {
+        RemoteRunStatus.Answered => RunStatus.Answered,
+        RemoteRunStatus.AskedUser => RunStatus.AskedUser,
+        RemoteRunStatus.Cancelled => RunStatus.Cancelled,
+        _ => RunStatus.Failed,
+    };
+
+    private static RemoteRunStatus MapRemoteStatus(RunStatus status) => status switch
+    {
+        RunStatus.Answered => RemoteRunStatus.Answered,
+        RunStatus.AskedUser => RemoteRunStatus.AskedUser,
+        RunStatus.Cancelled => RemoteRunStatus.Cancelled,
+        _ => RemoteRunStatus.Failed,
+    };
+
+    public void Dispose()
+    {
+        StopMesh();
+        NewChat();
+    }
+
+    private sealed class RemoteApprovalPrompter(IncomingRemoteTask task) : IApprovalPrompter
+    {
+        public async Task<ApprovalAnswer> AskAsync(FunctionCallContent call,
+                                                   ApprovalDecision decision,
+                                                   CancellationToken cancellationToken)
+        {
+            var argsJson = JsonSerializer.Serialize(call.Arguments);
+            var req = new TaskApprovalRequestPayload(task.TaskId,
+                                                     Guid.NewGuid().ToString("N"),
+                                                     call.Name,
+                                                     argsJson,
+                                                     decision.Note,
+                                                     decision.AllowForConversation);
+            var answer = await task.RequestApprovalAsync(req, cancellationToken);
+            return answer switch
+            {
+                RemoteApprovalAnswer.Allow => ApprovalAnswer.Allow,
+                RemoteApprovalAnswer.AllowForConversation => ApprovalAnswer.AllowForConversation,
+                _ => ApprovalAnswer.Deny,
+            };
+        }
+    }
+
+    private sealed class RemoteStepLimitPrompter : IStepLimitPrompter
+    {
+        public Task<bool> AskToContinueAsync(int stepsUsed, CancellationToken cancellationToken) =>
+            Task.FromResult(false);
+    }
 
     private sealed class ToolStartAuditLog(IAuditLog inner, Action<string> toolStarted) : IAuditLog
     {

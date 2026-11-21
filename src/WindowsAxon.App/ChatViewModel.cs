@@ -12,9 +12,9 @@ public sealed record ChatMessageView(string Speaker, string Text, MessageKind Ki
 {
     private bool IsUser => Speaker == "You";
 
-    public bool IsMarkdown => Speaker == "WindowsAxon";
+    public bool IsMarkdown => Speaker == "WindowsAxon" || Speaker.StartsWith("Reply to ", StringComparison.Ordinal);
 
-    public Visibility SpeakerVisibility => Speaker == "Error" ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility SpeakerVisibility => Speaker is "You" or "WindowsAxon" or "" ? Visibility.Collapsed : Visibility.Visible;
 
     public HorizontalAlignment Alignment => IsUser ? HorizontalAlignment.Right : HorizontalAlignment.Left;
 
@@ -236,6 +236,17 @@ public partial class ChatViewModel : ObservableObject
     }
 
     public void AddEvent(string text) => Add("", text, MessageKind.Event);
+
+    public void ShowRemoteRequest(string callerNode, string prompt)
+    {
+        AddDividerIfNeeded();
+        Add($"From {callerNode}", prompt);
+    }
+
+    public void ShowRemoteTool(string callerNode, string tool) => AddEvent($"[{callerNode}] Called {tool}");
+
+    public void ShowRemoteResponse(string callerNode, RunStatus status, string text) =>
+        Add(status == RunStatus.Failed ? $"Error (to {callerNode})" : $"Reply to {callerNode}", text);
 
     [RelayCommand(CanExecute = nameof(CanStartNewRequest))]
     private void StartNewRequest()

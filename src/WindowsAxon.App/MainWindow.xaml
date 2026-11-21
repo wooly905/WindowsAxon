@@ -41,6 +41,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Grid Padding="8,0,0,0">
                 <TextBlock Text="WindowsAxon" Style="{StaticResource SubtitleTextBlockStyle}" VerticalAlignment="Center" />
@@ -76,7 +77,16 @@
                     </DataTemplate>
                 </ListView.ItemTemplate>
             </ListView>
-            <StackPanel Grid.Row="2">
+            <Border Grid.Row="2" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,1" Padding="4,8,4,6">
+                <StackPanel Spacing="4">
+                    <Grid Padding="4,0">
+                        <TextBlock Text="Online computers" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+                        <TextBlock x:Name="MeshStatusBadge" HorizontalAlignment="Right" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" VerticalAlignment="Center" />
+                    </Grid>
+                    <ListView x:Name="OnlinePeersList" SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnlinePeersList_ItemClick" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" MaxHeight="140" AutomationProperties.Name="Online computers" />
+                </StackPanel>
+            </Border>
+            <StackPanel Grid.Row="3">
                 <Button Click="Skills_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" AutomationProperties.Name="Skills">
                     <StackPanel Orientation="Horizontal" Spacing="10">
                         <FontIcon Glyph="&#xE945;" FontSize="14" />
@@ -87,6 +97,12 @@
                     <StackPanel Orientation="Horizontal" Spacing="10">
                         <FontIcon Glyph="&#xE968;" FontSize="14" />
                         <TextBlock Text="MCP servers" />
+                    </StackPanel>
+                </Button>
+                <Button Click="Network_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" AutomationProperties.Name="Network">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <FontIcon Glyph="&#xE774;" FontSize="14" />
+                        <TextBlock Text="Network" />
                     </StackPanel>
                 </Button>
                 <Button Click="Settings_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" AutomationProperties.Name="Settings">

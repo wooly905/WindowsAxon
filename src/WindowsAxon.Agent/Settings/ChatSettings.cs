@@ -39,4 +39,7 @@ public sealed record ChatSettings
 
     /// <summary>External MCP servers whose tools the agent can use.</summary>
     public List<McpServerSettings> McpServers { get; init; } = [];
+
+    /// <summary>Distributed mesh settings for connecting to WindowsAxon.Hub.</summary>
+    public MeshSettings Mesh { get; init; } = new();
 }
