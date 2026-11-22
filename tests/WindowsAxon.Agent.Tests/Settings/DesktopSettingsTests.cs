@@ -437,6 +437,62 @@ public sealed class DesktopSettingsTests : IDisposable
         Assert.Throws<InvalidOperationException>(() => _secrets.Read(name));
     }
 
+    [Fact]
+    public void Legacy_mesh_enabled_flag_maps_to_central_server_mode()
+    {
+        var path = WriteSettings("""{ "Models": { "Chat": { "Mesh": { "Enabled": true, "HubUrl": "ws://192.168.1.10:5250/ws", "NodeName": "Desk" } } } }""");
+        using var service = CreateService(path);
+        service.LoadSettings();
+
+        Assert.Equal(MeshMode.CentralServer, service.Settings.Chat.Mesh.EffectiveMode);
+        Assert.True(service.Settings.Chat.Mesh.IsEnabled);
+    }
+
+    [Fact]
+    public void Mesh_validation_rejects_p2p_without_pair_key_and_central_without_hub_url()
+    {
+        using var service = CreateService();
+
+        Assert.Throws<ArgumentException>(() => service.SaveMeshSettings(MeshMode.PeerToPeer, "PC-A"));
+        Assert.Throws<ArgumentException>(() => service.SaveMeshSettings(MeshMode.CentralServer, "PC-A", hubUrl: ""));
+    }
+
+    [Fact(Skip = "Windows Credential Manager requires Windows.", SkipUnless = nameof(IsWindows))]
+    public void Mesh_mode_switching_persists_pair_key_and_token_credentials_and_supports_disable_all()
+    {
+        using var service = CreateService();
+        service.SaveMeshSettings(MeshMode.PeerToPeer, "PC-A", pairKey: "lan-secret-1");
+        var pairKeyRef = service.Settings.Chat.Mesh.PairKey;
+        Assert.NotNull(pairKeyRef);
+        var pairKeyCred = pairKeyRef[MeshSettings.CredentialPrefix.Length..];
+        _credentials.Add(pairKeyCred);
+
+        Assert.Equal(MeshMode.PeerToPeer, service.Settings.Chat.Mesh.EffectiveMode);
+        Assert.DoesNotContain("lan-secret-1", File.ReadAllText(Path.Combine(_folder, "settings.json")));
+        Assert.Equal("lan-secret-1", _secrets.Read(pairKeyCred));
+
+        // Switching to Disabled keeps the saved pair key so re-enabling P2P does not require re-typing it.
+        service.SaveMeshSettings(MeshMode.Disabled, "PC-A");
+        Assert.Equal(MeshMode.Disabled, service.Settings.Chat.Mesh.EffectiveMode);
+        Assert.False(service.Settings.Chat.Mesh.IsEnabled);
+        Assert.Equal(pairKeyRef, service.Settings.Chat.Mesh.PairKey);
+
+        // Switching to Central Server saves hub token while keeping saved pair key.
+        service.SaveMeshSettings(MeshMode.CentralServer, "PC-A", hubUrl: "ws://127.0.0.1:5250/ws", token: "hub-secret-1");
+        var tokenRef = service.Settings.Chat.Mesh.Token;
+        Assert.NotNull(tokenRef);
+        var tokenCred = tokenRef[MeshSettings.CredentialPrefix.Length..];
+        _credentials.Add(tokenCred);
+        Assert.Equal("hub-secret-1", _secrets.Read(tokenCred));
+
+        // Reloading from disk preserves mode and credential references.
+        using var reloaded = CreateService();
+        reloaded.LoadSettings();
+        Assert.Equal(MeshMode.CentralServer, reloaded.Settings.Chat.Mesh.EffectiveMode);
+        Assert.Equal(pairKeyRef, reloaded.Settings.Chat.Mesh.PairKey);
+        Assert.Equal(tokenRef, reloaded.Settings.Chat.Mesh.Token);
+    }
+
     public void Dispose()
     {
         foreach (var name in _credentials)

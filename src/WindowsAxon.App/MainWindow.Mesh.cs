@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using WindowsAxon.Agent.Settings;
 using WindowsAxon.Mesh;
 
 namespace WindowsAxon.App;
@@ -8,8 +9,17 @@ public sealed partial class MainWindow
 {
     private void RefreshOnlinePeers(IReadOnlyList<string> peers)
     {
+        var enabled = _service.Settings.Chat.Mesh.IsEnabled;
+        OnlinePeersPanel.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+
         OnlinePeersList.Items.Clear();
-        var self = _service.Settings.Chat.Mesh.EffectiveNodeName;
+        if (!enabled)
+        {
+            RefreshMeshStatus();
+            return;
+        }
+
+        var self = _service.EffectiveMeshNodeName;
         foreach (var peer in peers)
         {
             var isSelf = string.Equals(peer, self, StringComparison.OrdinalIgnoreCase);
@@ -38,7 +48,7 @@ public sealed partial class MainWindow
             {
                 Content = new TextBlock
                 {
-                    Text = _service.Settings.Chat.Mesh.Enabled ? "No computers online." : "Disabled",
+                    Text = "No computers online.",
                     FontSize = 12,
                 },
                 IsEnabled = false,
@@ -52,12 +62,13 @@ public sealed partial class MainWindow
 
     private void RefreshMeshStatus()
     {
+        OnlinePeersPanel.Visibility = _service.Settings.Chat.Mesh.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
         MeshStatusBadge.Text = _service.MeshState switch
         {
             MeshConnectionState.Connected => $"{_service.OnlinePeers.Count} online",
             MeshConnectionState.Connecting => "Connecting...",
             MeshConnectionState.Error => "Offline",
-            _ => _service.Settings.Chat.Mesh.Enabled ? "Offline" : "Off",
+            _ => _service.Settings.Chat.Mesh.IsEnabled ? "Offline" : "Off",
         };
     }
 
@@ -72,22 +83,75 @@ public sealed partial class MainWindow
     private async void Network_Click(object sender, RoutedEventArgs e)
     {
         var mesh = _service.Settings.Chat.Mesh;
-        var enabled = new ToggleSwitch
+        var modeSelector = new RadioButtons
         {
-            Header = "Distributed mode (connect to WindowsAxon.Hub)",
-            IsOn = mesh.Enabled,
+            Header = "Network mode",
+            Items =
+            {
+                new RadioButton { Content = "Disabled (standalone)", Tag = MeshMode.Disabled },
+                new RadioButton { Content = "Peer-to-Peer (same LAN)", Tag = MeshMode.PeerToPeer },
+                new RadioButton { Content = "Central Server (Internet)", Tag = MeshMode.CentralServer },
+            },
+            SelectedIndex = mesh.EffectiveMode switch
+            {
+                MeshMode.PeerToPeer => 1,
+                MeshMode.CentralServer => 2,
+                _ => 0,
+            },
         };
-        var hubUrl = new TextBox
+
+        var standaloneHint = new TextBlock
         {
-            Header = "Hub URL",
-            PlaceholderText = "ws://192.168.1.10:5250/ws or wss://hub.example.com/ws",
-            Text = mesh.HubUrl,
+            Text = "Standalone mode. Network discovery and remote requests are turned off.",
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.75,
         };
+
         var nodeName = new TextBox
         {
             Header = "This computer's name",
             PlaceholderText = Environment.MachineName,
             Text = mesh.NodeName,
+        };
+
+        // Peer-to-Peer controls
+        var pairKey = new PasswordBox
+        {
+            Header = "Pair key",
+            PlaceholderText = string.IsNullOrEmpty(mesh.PairKey)
+                ? "Enter the same pair key on every computer in this LAN"
+                : "Leave blank to keep saved pair key",
+            PasswordRevealMode = PasswordRevealMode.Peek,
+        };
+        var removePairKey = new CheckBox
+        {
+            Content = "Remove saved pair key",
+            Visibility = string.IsNullOrEmpty(mesh.PairKey) ? Visibility.Collapsed : Visibility.Visible,
+        };
+        removePairKey.Checked += (_, _) =>
+        {
+            pairKey.Password = "";
+            pairKey.IsEnabled = false;
+        };
+        removePairKey.Unchecked += (_, _) => pairKey.IsEnabled = true;
+
+        var p2pHint = new TextBlock
+        {
+            Text = "Computers on the same LAN with the same pair key discover each other automatically and communicate over an encrypted connection.",
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.75,
+        };
+        var p2pPanel = new StackPanel { Spacing = 10 };
+        p2pPanel.Children.Add(pairKey);
+        p2pPanel.Children.Add(removePairKey);
+        p2pPanel.Children.Add(p2pHint);
+
+        // Central Server controls
+        var hubUrl = new TextBox
+        {
+            Header = "Hub URL",
+            PlaceholderText = "ws://192.168.1.10:5250/ws or wss://hub.example.com/ws",
+            Text = mesh.HubUrl,
         };
         var token = new PasswordBox
         {
@@ -107,6 +171,30 @@ public sealed partial class MainWindow
         };
         removeToken.Unchecked += (_, _) => token.IsEnabled = true;
 
+        var hubPanel = new StackPanel { Spacing = 10 };
+        hubPanel.Children.Add(hubUrl);
+        hubPanel.Children.Add(token);
+        hubPanel.Children.Add(removeToken);
+
+        MeshMode SelectedMode() => modeSelector.SelectedIndex switch
+        {
+            1 => MeshMode.PeerToPeer,
+            2 => MeshMode.CentralServer,
+            _ => MeshMode.Disabled,
+        };
+
+        void UpdateModeVisibility()
+        {
+            var mode = SelectedMode();
+            standaloneHint.Visibility = mode == MeshMode.Disabled ? Visibility.Visible : Visibility.Collapsed;
+            nodeName.Visibility = mode != MeshMode.Disabled ? Visibility.Visible : Visibility.Collapsed;
+            p2pPanel.Visibility = mode == MeshMode.PeerToPeer ? Visibility.Visible : Visibility.Collapsed;
+            hubPanel.Visibility = mode == MeshMode.CentralServer ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        modeSelector.SelectionChanged += (_, _) => UpdateModeVisibility();
+        UpdateModeVisibility();
+
         var statusText = new TextBlock
         {
             Text = $"Status: {_service.MeshStatusMessage}",
@@ -119,18 +207,18 @@ public sealed partial class MainWindow
 
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
         var content = new StackPanel { Spacing = 12 };
-        content.Children.Add(enabled);
-        content.Children.Add(hubUrl);
+        content.Children.Add(modeSelector);
+        content.Children.Add(standaloneHint);
         content.Children.Add(nodeName);
-        content.Children.Add(token);
-        content.Children.Add(removeToken);
+        content.Children.Add(p2pPanel);
+        content.Children.Add(hubPanel);
         content.Children.Add(statusText);
         content.Children.Add(error);
 
         var dialog = new ContentDialog
         {
             Title = "Network (Distributed WindowsAxon)",
-            Content = new ScrollViewer { Content = content, MaxHeight = 480 },
+            Content = new ScrollViewer { Content = content, MaxHeight = 520 },
             PrimaryButtonText = "Save",
             CloseButtonText = "Close",
             DefaultButton = ContentDialogButton.Primary,
@@ -138,18 +226,25 @@ public sealed partial class MainWindow
 
         dialog.PrimaryButtonClick += (_, args) =>
         {
+            error.Text = "";
             try
             {
-                _service.SaveMeshSettings(enabled.IsOn,
-                                          hubUrl.Text,
+                var mode = SelectedMode();
+                _service.SaveMeshSettings(mode,
                                           nodeName.Text,
+                                          hubUrl.Text,
                                           token.Password,
-                                          removeToken.IsChecked == true);
+                                          removeToken.IsChecked == true,
+                                          pairKey.Password,
+                                          removePairKey.IsChecked == true);
                 RefreshOnlinePeers(_service.OnlinePeers);
                 RefreshMeshStatus();
-                ViewModel.AddEvent(enabled.IsOn
-                    ? $"Mesh enabled as '{_service.Settings.Chat.Mesh.EffectiveNodeName}' ({_service.Settings.Chat.Mesh.HubUrl})."
-                    : "Mesh disabled.");
+                ViewModel.AddEvent(mode switch
+                {
+                    MeshMode.PeerToPeer => $"Peer-to-peer mode enabled as '{_service.EffectiveMeshNodeName}'.",
+                    MeshMode.CentralServer => $"Central server mode enabled as '{_service.EffectiveMeshNodeName}' ({_service.Settings.Chat.Mesh.HubUrl}).",
+                    _ => "Network disabled (standalone mode).",
+                });
             }
             catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
             {
@@ -166,6 +261,7 @@ public sealed partial class MainWindow
         {
             _service.MeshStateChanged -= OnStateChanged;
             token.Password = "";
+            pairKey.Password = "";
         }
     }
 }

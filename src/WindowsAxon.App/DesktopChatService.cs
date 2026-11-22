@@ -14,6 +14,8 @@ using WindowsAxon.Windows;
 
 namespace WindowsAxon.App;
 
+public sealed record DesktopRunResult(RunStatus Status, string Text, int Steps, string? RemotePeer = null);
+
 public sealed class DesktopChatService(IApprovalPrompter approvals,
                                        IStepLimitPrompter stepLimits,
                                        string? settingsPath = null,
@@ -98,7 +100,7 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
     private IChatClient? _model;
     private AgentRunner? _runner;
     private WindowsToolSet? _toolSet;
-    private MeshClient? _meshClient;
+    private IMeshNode? _meshNode;
 
     public event Action? EmergencyStopRequested;
 
@@ -119,11 +121,13 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
 
     public event Action<string, RunStatus, string>? RemoteResponseSent;
 
-    public IReadOnlyList<string> OnlinePeers => _meshClient?.OnlinePeers ?? [];
+    public IReadOnlyList<string> OnlinePeers => _meshNode?.OnlinePeers ?? [];
 
-    public MeshConnectionState MeshState => _meshClient?.State ?? MeshConnectionState.Disconnected;
+    public MeshConnectionState MeshState => _meshNode?.State ?? MeshConnectionState.Disconnected;
 
-    public string MeshStatusMessage => _meshClient?.StatusMessage ?? (Settings.Chat.Mesh.Enabled ? "Disconnected" : "Disabled");
+    public string MeshStatusMessage => _meshNode?.StatusMessage ?? (Settings.Chat.Mesh.IsEnabled ? "Disconnected" : "Disabled");
+
+    public string EffectiveMeshNodeName => _meshNode?.NodeName ?? Settings.Chat.Mesh.EffectiveNodeName;
 
     private bool _forceNewRequest;
 
@@ -190,17 +194,17 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
                 : null;
     }
 
-    public async Task<RunResult> RunAsync(string text, CancellationToken cancellationToken)
+    public async Task<DesktopRunResult> RunAsync(string text, CancellationToken cancellationToken)
     {
-        if (Settings.Chat.Mesh.Enabled
+        if (Settings.Chat.Mesh.IsEnabled
             && PeerMentionParser.TryParse(text, OnlinePeers, out var targetNode, out var remotePrompt))
         {
             if (string.IsNullOrWhiteSpace(remotePrompt))
             {
-                return new RunResult(RunStatus.Failed, $"Enter a request after @{targetNode}.", 0);
+                return new DesktopRunResult(RunStatus.Failed, $"Enter a request after @{targetNode}.", 0);
             }
 
-            if (string.Equals(targetNode, Settings.Chat.Mesh.EffectiveNodeName, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(targetNode, EffectiveMeshNodeName, StringComparison.OrdinalIgnoreCase))
             {
                 text = remotePrompt;
             }
@@ -268,7 +272,7 @@ appTools,
         {
             var result = await _runner.RunAsync(text, forceNewRequest: force, cancellationToken: cancellationToken);
             TryAppendHistory(ChatDirection.Local, null, text, result.Text, result.Status, result.Steps, tools);
-            return result;
+            return new DesktopRunResult(result.Status, result.Text, result.Steps);
         }
         finally
         {
@@ -555,8 +559,15 @@ appTools,
         }
     }
 
-    /// <summary>Writes the settings file in one step. A new secret is written first and removed when the file write fails.</summary>
-    private void WriteSettings(ModelSettings updated, WindowsSecretStore secrets, string? newCredential, string? secret)
+    /// <summary>Writes the settings file in one step. New secrets are written first and removed when the file write fails.</summary>
+    private void WriteSettings(ModelSettings updated, WindowsSecretStore secrets, string? newCredential, string? secret) =>
+        WriteSettings(updated,
+                      secrets,
+                      newCredential is not null ? [(newCredential, secret!)] : []);
+
+    private void WriteSettings(ModelSettings updated,
+                               WindowsSecretStore secrets,
+                               IReadOnlyList<(string Name, string Secret)> newCredentials)
     {
         var json = JsonSerializer.Serialize(new
         {
@@ -568,27 +579,33 @@ appTools,
         },
                                             SettingsJsonOptions);
         var temporaryPath = $"{_settingsPath}.{Guid.NewGuid():N}.tmp";
-        if (newCredential is not null)
-        {
-            secrets.Write(newCredential, secret!);
-        }
+        var writtenCredentials = new List<string>(newCredentials.Count);
         try
         {
+            foreach (var (name, value) in newCredentials)
+            {
+                secrets.Write(name, value);
+                writtenCredentials.Add(name);
+            }
+
             Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
             File.WriteAllText(temporaryPath, json);
             File.Move(temporaryPath, _settingsPath, overwrite: true);
         }
         catch
         {
-            if (newCredential is not null)
+            foreach (var name in writtenCredentials)
             {
-                secrets.Delete(newCredential);
+                secrets.Delete(name);
             }
             throw;
         }
         finally
         {
-            File.Delete(temporaryPath);
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
         }
     }
 
@@ -607,7 +624,8 @@ appTools,
     {
         StopMesh();
         var mesh = Settings.Chat.Mesh;
-        if (!mesh.Enabled || string.IsNullOrWhiteSpace(mesh.HubUrl))
+        var mode = mesh.EffectiveMode;
+        if (mode == MeshMode.Disabled)
         {
             MeshStateChanged?.Invoke(MeshConnectionState.Disconnected, "Disabled");
             PeersChanged?.Invoke([]);
@@ -616,60 +634,97 @@ appTools,
 
         mesh.Validate();
         var secrets = new WindowsSecretStore();
-        var token = !string.IsNullOrEmpty(mesh.Token) && mesh.Token.StartsWith(MeshSettings.CredentialPrefix, StringComparison.Ordinal)
-            ? secrets.Read(mesh.Token[MeshSettings.CredentialPrefix.Length..])
-            : null;
-        var client = new MeshClient(new Uri(mesh.HubUrl.Trim()),
-                                    mesh.EffectiveNodeName,
-                                    token,
+        IMeshNode node;
+        if (mode == MeshMode.CentralServer)
+        {
+            var token = !string.IsNullOrEmpty(mesh.Token) && mesh.Token.StartsWith(MeshSettings.CredentialPrefix, StringComparison.Ordinal)
+                ? secrets.Read(mesh.Token[MeshSettings.CredentialPrefix.Length..])
+                : null;
+            node = new MeshClient(new Uri(mesh.HubUrl.Trim()),
+                                  mesh.EffectiveNodeName,
+                                  token,
+                                  HandleIncomingRemoteTaskAsync);
+        }
+        else
+        {
+            var pairKey = secrets.Read(mesh.PairKey![MeshSettings.CredentialPrefix.Length..]);
+            if (string.IsNullOrWhiteSpace(pairKey))
+            {
+                throw new InvalidOperationException("The saved pair key is empty. Open Network settings to re-enter it.");
+            }
+
+            node = new PeerMeshNode(mesh.EffectiveNodeName,
+                                    pairKey,
                                     HandleIncomingRemoteTaskAsync);
-        client.PeersChanged += peers => PeersChanged?.Invoke(peers);
-        client.ConnectionStateChanged += (state, message) => MeshStateChanged?.Invoke(state, message);
-        _meshClient = client;
-        client.Start();
+        }
+
+        node.PeersChanged += peers => PeersChanged?.Invoke(peers);
+        node.ConnectionStateChanged += (state, message) => MeshStateChanged?.Invoke(state, message);
+        _meshNode = node;
+        node.Start();
     }
 
     public void StopMesh()
     {
-        var previous = Interlocked.Exchange(ref _meshClient, null);
+        var previous = Interlocked.Exchange(ref _meshNode, null);
         if (previous is not null)
         {
             _ = previous.DisposeAsync();
         }
     }
 
-    public void SaveMeshSettings(bool enabled,
-                                 string hubUrl,
+    public void SaveMeshSettings(MeshMode mode,
                                  string nodeName,
+                                 string hubUrl = "",
                                  string token = "",
-                                 bool removeToken = false)
+                                 bool removeToken = false,
+                                 string pairKey = "",
+                                 bool removePairKey = false)
     {
         hubUrl = hubUrl.Trim();
         nodeName = nodeName.Trim();
         token = token.Trim();
+        pairKey = pairKey.Trim();
         if (token.Contains('\0'))
         {
             throw new ArgumentException("The hub token contains an invalid character.");
         }
 
+        if (pairKey.Contains('\0'))
+        {
+            throw new ArgumentException("The pair key contains an invalid character.");
+        }
+
         var previous = Settings.Chat.Mesh;
-        var previousReference = previous.Token;
-        var reference = !removeToken && string.Equals(previous.HubUrl.Trim(), hubUrl, StringComparison.OrdinalIgnoreCase)
-            ? previousReference
+        var newCredentials = new List<(string Name, string Secret)>();
+
+        var previousTokenRef = previous.Token;
+        var tokenRef = !removeToken && string.Equals(previous.HubUrl.Trim(), hubUrl, StringComparison.OrdinalIgnoreCase)
+            ? previousTokenRef
             : null;
-        string? newCredential = null;
         if (!removeToken && token.Length > 0)
         {
-            newCredential = $"{MeshCredentialPrefix}{Guid.NewGuid():N}";
-            reference = MeshSettings.CredentialPrefix + newCredential;
+            var credName = $"{MeshCredentialPrefix}{Guid.NewGuid():N}";
+            newCredentials.Add((credName, token));
+            tokenRef = MeshSettings.CredentialPrefix + credName;
+        }
+
+        var previousPairKeyRef = previous.PairKey;
+        var pairKeyRef = !removePairKey ? previousPairKeyRef : null;
+        if (!removePairKey && pairKey.Length > 0)
+        {
+            var credName = $"{MeshCredentialPrefix}{Guid.NewGuid():N}";
+            newCredentials.Add((credName, pairKey));
+            pairKeyRef = MeshSettings.CredentialPrefix + credName;
         }
 
         var updatedMesh = new MeshSettings
         {
-            Enabled = enabled,
+            Mode = mode,
             HubUrl = hubUrl,
             NodeName = nodeName,
-            Token = reference,
+            Token = tokenRef,
+            PairKey = pairKeyRef,
         };
         updatedMesh.Validate();
 
@@ -678,44 +733,51 @@ appTools,
             Chat = Settings.Chat with { Mesh = updatedMesh }
         };
         var secrets = new WindowsSecretStore();
-        WriteSettings(updated, secrets, newCredential, token);
+        WriteSettings(updated, secrets, newCredentials);
         Settings = updated;
 
-        if (previousReference is not null
-            && previousReference != reference
-            && previousReference.StartsWith(MeshSettings.CredentialPrefix + MeshCredentialPrefix, StringComparison.Ordinal))
-        {
-            secrets.Delete(previousReference[MeshSettings.CredentialPrefix.Length..]);
-        }
+        DeleteReplacedMeshCredential(secrets, previousTokenRef, tokenRef);
+        DeleteReplacedMeshCredential(secrets, previousPairKeyRef, pairKeyRef);
 
         StartMesh();
     }
 
-    private async Task<RunResult> RunOnRemotePeerAsync(string targetNode, string prompt, CancellationToken cancellationToken)
+    private static void DeleteReplacedMeshCredential(WindowsSecretStore secrets, string? previousRef, string? currentRef)
+    {
+        if (previousRef is not null
+            && previousRef != currentRef
+            && previousRef.StartsWith(MeshSettings.CredentialPrefix + MeshCredentialPrefix, StringComparison.Ordinal))
+        {
+            secrets.Delete(previousRef[MeshSettings.CredentialPrefix.Length..]);
+        }
+    }
+
+    private async Task<DesktopRunResult> RunOnRemotePeerAsync(string targetNode, string prompt, CancellationToken cancellationToken)
     {
         var tools = new List<string>();
-        var client = _meshClient;
-        if (client is null || client.State != MeshConnectionState.Connected)
+        var node = _meshNode;
+        if (node is null || node.State != MeshConnectionState.Connected)
         {
-            var failed = new RunResult(RunStatus.Failed,
-                                       $"Not connected to mesh hub ({MeshStatusMessage}). Open Network in the sidebar to check settings.",
-                                       0);
+            var failed = new DesktopRunResult(RunStatus.Failed,
+                                              $"Not connected to mesh network ({MeshStatusMessage}). Open Network in the sidebar to check settings.",
+                                              0,
+                                              targetNode);
             TryAppendHistory(ChatDirection.Outgoing, targetNode, prompt, failed.Text, failed.Status, failed.Steps, tools);
             return failed;
         }
 
         try
         {
-            var result = await client.RunRemoteTaskAsync(targetNode,
-                                                         prompt,
-                                                         tool =>
-                                                         {
-                                                             tools.Add(tool);
-                                                             ToolStarted?.Invoke($"[{targetNode}] {tool}");
-                                                         },
-                                                         (req, ct) => AskRemoteApprovalAsync(targetNode, req, ct),
-                                                         cancellationToken);
-            var runResult = new RunResult(MapRunStatus(result.Status), result.Text, result.Steps);
+            var result = await node.RunRemoteTaskAsync(targetNode,
+                                                       prompt,
+                                                       tool =>
+                                                       {
+                                                           tools.Add(tool);
+                                                           ToolStarted?.Invoke($"[{targetNode}] {tool}");
+                                                       },
+                                                       (req, ct) => AskRemoteApprovalAsync(targetNode, req, ct),
+                                                       cancellationToken);
+            var runResult = new DesktopRunResult(MapRunStatus(result.Status), result.Text, result.Steps, targetNode);
             TryAppendHistory(ChatDirection.Outgoing, targetNode, prompt, runResult.Text, runResult.Status, runResult.Steps, tools);
             return runResult;
         }
@@ -850,7 +912,7 @@ appTools,
         {
             _chatHistory.Append(new ChatHistoryEntry(DateTimeOffset.Now,
                                                      direction,
-                                                     Settings.Chat.Mesh.EffectiveNodeName,
+                                                     EffectiveMeshNodeName,
                                                      peerNode,
                                                      prompt,
                                                      response,

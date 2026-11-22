@@ -15,7 +15,9 @@ public sealed record ChatMessageView(string Speaker,
 {
     private bool IsUser => Speaker == "You";
 
-    public bool IsMarkdown => Speaker == "WindowsAxon" || Speaker.StartsWith("Reply to ", StringComparison.Ordinal);
+    public bool IsMarkdown => Speaker == "WindowsAxon"
+        || Speaker.StartsWith("Reply to ", StringComparison.Ordinal)
+        || Speaker.StartsWith("Replied from ", StringComparison.Ordinal);
 
     public Visibility SpeakerVisibility => Speaker is "You" or "WindowsAxon" or "" ? Visibility.Collapsed : Visibility.Visible;
 
@@ -26,9 +28,10 @@ public sealed record ChatMessageView(string Speaker,
     public Thickness BorderThickness => IsUser ? new Thickness(0) : new Thickness(1);
 
     public Brush Background => Resource(IsUser ? "AccentFillColorDefaultBrush"
-        : Speaker == "Error" ? "SystemFillColorCriticalBackgroundBrush" : "WindowsAxonMessageBackgroundBrush");
+        : Speaker.StartsWith("Error", StringComparison.Ordinal) ? "SystemFillColorCriticalBackgroundBrush" : "WindowsAxonMessageBackgroundBrush");
 
-    public Brush BorderBrush => Resource(Speaker == "WindowsAxon" ? "WindowsAxonMessageBorderBrush" : "CardStrokeColorDefaultBrush");
+    public Brush BorderBrush => Resource(Speaker == "WindowsAxon" || Speaker.StartsWith("Replied from ", StringComparison.Ordinal)
+        ? "WindowsAxonMessageBorderBrush" : "CardStrokeColorDefaultBrush");
 
     public Brush Foreground => Resource(IsUser ? "TextOnAccentFillColorPrimaryBrush" : "TextFillColorPrimaryBrush");
 
@@ -125,7 +128,10 @@ public partial class ChatViewModel : ObservableObject
         {
             var result = await service.RunAsync(text, cancellationToken);
             AwaitingReply = result.Status == RunStatus.AskedUser;
-            Add(result.Status == RunStatus.Failed ? "Error" : "WindowsAxon", result.Text);
+            var speaker = result.Status == RunStatus.Failed
+                ? (result.RemotePeer is { } failedPeer ? $"Error (from {failedPeer})" : "Error")
+                : (result.RemotePeer is { } remotePeer ? $"Replied from {remotePeer}" : "WindowsAxon");
+            Add(speaker, result.Text);
             Status = result.Status switch
             {
                 RunStatus.Cancelled => "Stopped. You can enter a new request.",

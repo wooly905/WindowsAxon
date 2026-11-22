@@ -20,7 +20,7 @@ public enum MeshConnectionState
 }
 
 /// <summary>Persistent WebSocket client connecting a WindowsAxon node to WindowsAxon.Hub.</summary>
-public sealed class MeshClient : IAsyncDisposable
+public sealed class MeshClient : IMeshNode
 {
     private static readonly TimeSpan[] ReconnectDelays =
     [
