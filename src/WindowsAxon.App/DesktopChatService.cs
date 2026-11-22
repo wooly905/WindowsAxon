@@ -16,7 +16,8 @@ namespace WindowsAxon.App;
 
 public sealed class DesktopChatService(IApprovalPrompter approvals,
                                        IStepLimitPrompter stepLimits,
-                                       string? settingsPath = null) : IDisposable
+                                       string? settingsPath = null,
+                                       string? chatHistoryFolder = null) : IDisposable
 {
     private const string ManagedCredentialPrefix = "credential:WindowsAxon/desktop/";
     private const string McpCredentialPrefix = "WindowsAxon/mcp/";
@@ -84,6 +85,8 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
     }
 
     private readonly string _settingsPath = settingsPath is null ? SettingsPath : Path.GetFullPath(settingsPath);
+    private readonly ChatHistoryLog _chatHistory = new(chatHistoryFolder is null ? ChatHistoryLog.DefaultFolder : Path.GetFullPath(chatHistoryFolder));
+    private List<string>? _activeLocalTools;
 
     private static string? GetConfigOverride()
     {
@@ -225,8 +228,12 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
                                    active => InputActiveChanged?.Invoke(active),
                                    Settings.Chat.AllowedPrivateHosts);
             var mcpAgents = await AddMcpServersAsync(catalog, _toolSet, cancellationToken);
-            var audit =new ToolStartAuditLog(new JsonlAuditLog(Path.Combine(DataFolder, "logs")),
-                                              tool => ToolStarted?.Invoke(tool));
+            var audit = new ToolStartAuditLog(new JsonlAuditLog(Path.Combine(DataFolder, "logs")),
+                                              tool =>
+                                              {
+                                                  _activeLocalTools?.Add(tool);
+                                                  ToolStarted?.Invoke(tool);
+                                              });
             var toolNames = catalog.Entries.Select(e => e.Name).ToHashSet();
             // Off the UI thread: loading reads every SKILL.md.
             var skills = await Task.Run(() => SkillCatalog.LoadAsync([(BuiltInSkillsFolder, true), (UserSkillsFolder, false)],
@@ -254,13 +261,18 @@ appTools,
 
         var force = _forceNewRequest;
         _forceNewRequest = false;
+        var tools = new List<string>();
+        _activeLocalTools = tools;
         using var stop = cancellationToken.Register(() => _toolSet?.StopBrowser());
         try
         {
-            return await _runner.RunAsync(text, forceNewRequest: force, cancellationToken: cancellationToken);
+            var result = await _runner.RunAsync(text, forceNewRequest: force, cancellationToken: cancellationToken);
+            TryAppendHistory(ChatDirection.Local, null, text, result.Text, result.Status, result.Steps, tools);
+            return result;
         }
         finally
         {
+            _activeLocalTools = null;
             _toolSet?.CloseResearchBrowser();
         }
     }
@@ -681,20 +693,42 @@ appTools,
 
     private async Task<RunResult> RunOnRemotePeerAsync(string targetNode, string prompt, CancellationToken cancellationToken)
     {
+        var tools = new List<string>();
         var client = _meshClient;
         if (client is null || client.State != MeshConnectionState.Connected)
         {
-            return new RunResult(RunStatus.Failed,
-                                 $"Not connected to mesh hub ({MeshStatusMessage}). Open Network in the sidebar to check settings.",
-                                 0);
+            var failed = new RunResult(RunStatus.Failed,
+                                       $"Not connected to mesh hub ({MeshStatusMessage}). Open Network in the sidebar to check settings.",
+                                       0);
+            TryAppendHistory(ChatDirection.Outgoing, targetNode, prompt, failed.Text, failed.Status, failed.Steps, tools);
+            return failed;
         }
 
-        var result = await client.RunRemoteTaskAsync(targetNode,
-                                                     prompt,
-                                                     tool => ToolStarted?.Invoke($"[{targetNode}] {tool}"),
-                                                     (req, ct) => AskRemoteApprovalAsync(targetNode, req, ct),
-                                                     cancellationToken);
-        return new RunResult(MapRunStatus(result.Status), result.Text, result.Steps);
+        try
+        {
+            var result = await client.RunRemoteTaskAsync(targetNode,
+                                                         prompt,
+                                                         tool =>
+                                                         {
+                                                             tools.Add(tool);
+                                                             ToolStarted?.Invoke($"[{targetNode}] {tool}");
+                                                         },
+                                                         (req, ct) => AskRemoteApprovalAsync(targetNode, req, ct),
+                                                         cancellationToken);
+            var runResult = new RunResult(MapRunStatus(result.Status), result.Text, result.Steps);
+            TryAppendHistory(ChatDirection.Outgoing, targetNode, prompt, runResult.Text, runResult.Status, runResult.Steps, tools);
+            return runResult;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            TryAppendHistory(ChatDirection.Outgoing, targetNode, prompt, "Stopped.", RunStatus.Cancelled, 0, tools);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            TryAppendHistory(ChatDirection.Outgoing, targetNode, prompt, ex.Message, RunStatus.Failed, 0, tools);
+            throw;
+        }
     }
 
     private async Task<RemoteApprovalAnswer> AskRemoteApprovalAsync(string targetNode,
@@ -733,6 +767,7 @@ appTools,
                                                                        CancellationToken cancellationToken)
     {
         RemoteRequestReceived?.Invoke(task.CallerNode, task.Prompt);
+        var tools = new List<string>();
         try
         {
             var factory = await new EndpointFactory(Settings, new WindowsSecretStore()).ResolveAsync(cancellationToken);
@@ -751,6 +786,7 @@ appTools,
             var audit = new ToolStartAuditLog(new JsonlAuditLog(Path.Combine(DataFolder, "logs")),
                                               tool =>
                                               {
+                                                  tools.Add(tool);
                                                   task.ReportToolStarted(tool);
                                                   RemoteToolStarted?.Invoke(task.CallerNode, tool);
                                               });
@@ -779,6 +815,7 @@ appTools,
             try
             {
                 var result = await runner.RunAsync(task.Prompt, forceNewRequest: true, cancellationToken: cancellationToken);
+                TryAppendHistory(ChatDirection.Incoming, task.CallerNode, task.Prompt, result.Text, result.Status, result.Steps, tools);
                 RemoteResponseSent?.Invoke(task.CallerNode, result.Status, result.Text);
                 return new RemoteTaskResult(MapRemoteStatus(result.Status), result.Text, result.Steps);
             }
@@ -789,13 +826,41 @@ appTools,
         }
         catch (OperationCanceledException)
         {
+            TryAppendHistory(ChatDirection.Incoming, task.CallerNode, task.Prompt, "Stopped.", RunStatus.Cancelled, 0, tools);
             RemoteResponseSent?.Invoke(task.CallerNode, RunStatus.Cancelled, "Stopped.");
             throw;
         }
         catch (Exception ex)
         {
+            TryAppendHistory(ChatDirection.Incoming, task.CallerNode, task.Prompt, ex.Message, RunStatus.Failed, 0, tools);
             RemoteResponseSent?.Invoke(task.CallerNode, RunStatus.Failed, ex.Message);
             throw;
+        }
+    }
+
+    private void TryAppendHistory(ChatDirection direction,
+                                  string? peerNode,
+                                  string prompt,
+                                  string response,
+                                  RunStatus status,
+                                  int steps,
+                                  IReadOnlyList<string> tools)
+    {
+        try
+        {
+            _chatHistory.Append(new ChatHistoryEntry(DateTimeOffset.Now,
+                                                     direction,
+                                                     Settings.Chat.Mesh.EffectiveNodeName,
+                                                     peerNode,
+                                                     prompt,
+                                                     response,
+                                                     status,
+                                                     steps,
+                                                     [.. tools]));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // History logging must not break an active local or remote response.
         }
     }
 

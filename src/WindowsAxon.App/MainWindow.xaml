@@ -41,7 +41,6 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Grid Padding="8,0,0,0">
                 <TextBlock Text="WindowsAxon" Style="{StaticResource SubtitleTextBlockStyle}" VerticalAlignment="Center" />
@@ -49,44 +48,20 @@
                     <FontIcon Glyph="&#xE710;" FontSize="14" />
                 </Button>
             </Grid>
-            <ListView x:Name="ConversationList" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True" ItemClick="ConversationList_ItemClick" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" AutomationProperties.Name="Conversations">
-                <ListView.GroupStyle>
-                    <GroupStyle>
-                        <GroupStyle.HeaderTemplate>
-                            <DataTemplate x:DataType="local:ConversationGroup">
-                                <TextBlock Text="{x:Bind Key}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                            </DataTemplate>
-                        </GroupStyle.HeaderTemplate>
-                    </GroupStyle>
-                </ListView.GroupStyle>
-                <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="local:ConversationSummary">
-                        <StackPanel Padding="0,6" Background="Transparent">
-                            <StackPanel.ContextFlyout>
-                                <MenuFlyout>
-                                    <MenuFlyoutItem Text="Delete" Tag="{x:Bind Id}" Click="DeleteConversation_Click">
-                                        <MenuFlyoutItem.Icon>
-                                            <FontIcon Glyph="&#xE74D;" />
-                                        </MenuFlyoutItem.Icon>
-                                    </MenuFlyoutItem>
-                                </MenuFlyout>
-                            </StackPanel.ContextFlyout>
-                            <TextBlock Text="{x:Bind Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                            <TextBlock Text="{x:Bind Preview}" FontSize="11" TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        </StackPanel>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
-            <Border Grid.Row="2" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,1" Padding="4,8,4,6">
-                <StackPanel Spacing="4">
+            <Border Grid.Row="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,1" Padding="4,8,4,6">
+                <Grid RowSpacing="4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
                     <Grid Padding="4,0">
                         <TextBlock Text="Online computers" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
                         <TextBlock x:Name="MeshStatusBadge" HorizontalAlignment="Right" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" VerticalAlignment="Center" />
                     </Grid>
-                    <ListView x:Name="OnlinePeersList" SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnlinePeersList_ItemClick" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" MaxHeight="140" AutomationProperties.Name="Online computers" />
-                </StackPanel>
+                    <ListView x:Name="OnlinePeersList" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnlinePeersList_ItemClick" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" AutomationProperties.Name="Online computers" />
+                </Grid>
             </Border>
-            <StackPanel Grid.Row="3">
+            <StackPanel Grid.Row="2">
                 <Button Click="Skills_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" AutomationProperties.Name="Skills">
                     <StackPanel Orientation="Horizontal" Spacing="10">
                         <FontIcon Glyph="&#xE945;" FontSize="14" />

@@ -7,7 +7,6 @@ using WindowsAxon.App.Updates;
 using Microsoft.Extensions.AI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Input;
 using Windows.System;
 using Windows.UI.Core;
@@ -23,6 +22,7 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
     private static readonly HttpClient UpdateHttp = new() { Timeout = TimeSpan.FromMinutes(10) };
     private readonly CancellationTokenSource _closing = new();
     private readonly UpdateState _updateState = new(UpdateState.DefaultPath);
+    private readonly DispatcherTimer _pruneTimer = new() { Interval = TimeSpan.FromMinutes(5) };
     private ReleaseInfo? _availableUpdate;
     private bool _updating;
 
@@ -45,7 +45,7 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
             settingsError = "Could not load settings. Open Settings to configure the model.";
         }
 
-        ViewModel = new ChatViewModel(_service, new ConversationStore(ConversationStore.DefaultFolder));
+        ViewModel = new ChatViewModel(_service);
         _service.EmergencyStopRequested += () => DispatcherQueue.TryEnqueue(() => ViewModel.SendCommand.Cancel());
         _service.InputActiveChanged += active => DispatcherQueue.TryEnqueue(() => InputBanner.Visibility = active ? Visibility.Visible : Visibility.Collapsed);
         _service.ToolStarted += tool => DispatcherQueue.TryEnqueue(() => ViewModel.ShowTool(tool));
@@ -71,11 +71,8 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         InitializeComponent();
         RefreshOnlinePeers(_service.OnlinePeers);
         RefreshMeshStatus();
-        ConversationList.ItemsSource = new CollectionViewSource
-        {
-            IsSourceGrouped = true,
-            Source = ViewModel.ConversationGroups,
-        }.View;
+        _pruneTimer.Tick += (_, _) => ViewModel.PruneExpired();
+        _pruneTimer.Start();
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1000, 900));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "WindowsAxon.ico"));
         if (Environment.ProcessPath is { } executable)
@@ -86,6 +83,7 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         _ = CheckForUpdatesAsync(_closing.Token);
         Closed += (_, _) =>
         {
+            _pruneTimer.Stop();
             _closing.Cancel();
             ViewModel.SendCommand.Cancel();
             _activeDialog?.Hide();
@@ -217,22 +215,6 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
                                    () =>
             ConversationScroll.ChangeView(null, ConversationScroll.ScrollableHeight, null, disableAnimation: true));
-
-    private void ConversationList_ItemClick(object sender, ItemClickEventArgs e)
-    {
-        if (e.ClickedItem is ConversationSummary summary)
-        {
-            ViewModel.OpenConversation(summary.Id);
-        }
-    }
-
-    private void DeleteConversation_Click(object sender, RoutedEventArgs e)
-    {
-        if (((FrameworkElement)sender).Tag is string id)
-        {
-            ViewModel.DeleteConversation(id);
-        }
-    }
 
     private async void Attach_Click(object sender, RoutedEventArgs e)
     {
