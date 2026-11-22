@@ -190,6 +190,20 @@ public partial class ChatViewModel : ObservableObject
     public void ShowRemoteResponse(string callerNode, RunStatus status, string text) =>
         Add(status == RunStatus.Failed ? $"Error (to {callerNode})" : $"Reply to {callerNode}", text);
 
+    public void ShowRemoteFileReceived(string callerNode, string fileName, long sizeBytes, string savedPath)
+    {
+        AddDividerIfNeeded();
+        Add($"From {callerNode}", $"Received file {fileName} ({FormatByteSize(sizeBytes)})\nSaved to {savedPath}");
+    }
+
+    private static string FormatByteSize(long bytes) => bytes switch
+    {
+        >= 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024 * 1024):0.##} GB",
+        >= 1024L * 1024 => $"{bytes / (1024.0 * 1024):0.##} MB",
+        >= 1024L => $"{bytes / 1024.0:0.#} KB",
+        _ => $"{bytes} B",
+    };
+
     [RelayCommand(CanExecute = nameof(CanStartNewRequest))]
     private void StartNewRequest()
     {

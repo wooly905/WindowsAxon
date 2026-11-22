@@ -88,6 +88,8 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
 
     private readonly string _settingsPath = settingsPath is null ? SettingsPath : Path.GetFullPath(settingsPath);
     private readonly ChatHistoryLog _chatHistory = new(chatHistoryFolder is null ? ChatHistoryLog.DefaultFolder : Path.GetFullPath(chatHistoryFolder));
+    private readonly ArtifactStore _artifactStore = new(Path.Combine(DataFolder, "artifacts"));
+    private readonly AsyncLocal<MeshCallContext?> _currentCallContext = new();
     private List<string>? _activeLocalTools;
 
     private static string? GetConfigOverride()
@@ -101,6 +103,10 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
     private AgentRunner? _runner;
     private WindowsToolSet? _toolSet;
     private IMeshNode? _meshNode;
+    private MeshJobService? _meshJobs;
+    private ArtifactService? _meshArtifacts;
+    private FileTransferService? _meshFiles;
+    private MeshOrchestrator? _meshOrchestrator;
 
     public event Action? EmergencyStopRequested;
 
@@ -121,13 +127,19 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
 
     public event Action<string, RunStatus, string>? RemoteResponseSent;
 
+    public event Action<ReceivedFileInfo>? FileReceived;
+
     public IReadOnlyList<string> OnlinePeers => _meshNode?.OnlinePeers ?? [];
+
+    public IReadOnlyList<PeerInfo> OnlinePeerInfos => _meshNode?.PeerInfos ?? [];
 
     public MeshConnectionState MeshState => _meshNode?.State ?? MeshConnectionState.Disconnected;
 
     public string MeshStatusMessage => _meshNode?.StatusMessage ?? (Settings.Chat.Mesh.IsEnabled ? "Disconnected" : "Disabled");
 
     public string EffectiveMeshNodeName => _meshNode?.NodeName ?? Settings.Chat.Mesh.EffectiveNodeName;
+
+    public void PruneExpiredArtifacts() => _artifactStore.PruneExpired();
 
     private bool _forceNewRequest;
 
@@ -231,6 +243,17 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
                                    () => EmergencyStopRequested?.Invoke(),
                                    active => InputActiveChanged?.Invoke(active),
                                    Settings.Chat.AllowedPrivateHosts);
+            if (Settings.Chat.Mesh.IsEnabled)
+            {
+                ToolRegistration.Add(catalog,
+                                     new MeshTools(() => _meshNode,
+                                                   () => _meshFiles,
+                                                   () => _meshArtifacts,
+                                                   () => _meshOrchestrator,
+                                                   () => EffectiveMeshNodeName,
+                                                   () => _currentCallContext.Value,
+                                                   msg => ToolStarted?.Invoke(msg)));
+            }
             var mcpAgents = await AddMcpServersAsync(catalog, _toolSet, cancellationToken);
             var audit = new ToolStartAuditLog(new JsonlAuditLog(Path.Combine(DataFolder, "logs")),
                                               tool =>
@@ -634,6 +657,14 @@ appTools,
 
         mesh.Validate();
         var secrets = new WindowsSecretStore();
+        var capabilities = new PeerCapabilities(
+            [
+                MeshServiceNames.AgentTask,
+                MeshServiceNames.FileTransfer,
+                MeshServiceNames.ArtifactFetch,
+                MeshServiceNames.Jobs,
+            ],
+            OsDescription: Environment.OSVersion.VersionString);
         IMeshNode node;
         if (mode == MeshMode.CentralServer)
         {
@@ -643,7 +674,8 @@ appTools,
             node = new MeshClient(new Uri(mesh.HubUrl.Trim()),
                                   mesh.EffectiveNodeName,
                                   token,
-                                  HandleIncomingRemoteTaskAsync);
+                                  HandleIncomingRemoteTaskAsync,
+                                  capabilities);
         }
         else
         {
@@ -655,17 +687,47 @@ appTools,
 
             node = new PeerMeshNode(mesh.EffectiveNodeName,
                                     pairKey,
-                                    HandleIncomingRemoteTaskAsync);
+                                    HandleIncomingRemoteTaskAsync,
+                                    capabilities: capabilities);
         }
+
+        var jobs = new MeshJobService(node);
+        var artifacts = new ArtifactService(node, _artifactStore);
+        var files = new FileTransferService(node);
+        var orchestrator = new MeshOrchestrator(node,
+                                                jobs,
+                                                HandleIncomingOrchestratedTaskAsync,
+                                                AskRemoteApprovalAsync);
+        files.FileReceived += info =>
+        {
+            TryAppendHistory(ChatDirection.Incoming,
+                             info.CallerNode,
+                             $"File transfer: {info.FileName} ({info.SizeBytes:N0} bytes)",
+                             $"Saved to {info.SavedPath}",
+                             RunStatus.Answered,
+                             1,
+                             ["mesh_receive_file"]);
+            FileReceived?.Invoke(info);
+        };
 
         node.PeersChanged += peers => PeersChanged?.Invoke(peers);
         node.ConnectionStateChanged += (state, message) => MeshStateChanged?.Invoke(state, message);
+        _meshJobs = jobs;
+        _meshArtifacts = artifacts;
+        _meshFiles = files;
+        _meshOrchestrator = orchestrator;
         _meshNode = node;
         node.Start();
     }
 
     public void StopMesh()
     {
+        var previousJobs = Interlocked.Exchange(ref _meshJobs, null);
+        previousJobs?.Dispose();
+        _meshArtifacts = null;
+        _meshFiles = null;
+        _meshOrchestrator = null;
+
         var previous = Interlocked.Exchange(ref _meshNode, null);
         if (previous is not null)
         {
@@ -738,6 +800,11 @@ appTools,
 
         DeleteReplacedMeshCredential(secrets, previousTokenRef, tokenRef);
         DeleteReplacedMeshCredential(secrets, previousPairKeyRef, pairKeyRef);
+
+        if (previous.IsEnabled != updatedMesh.IsEnabled)
+        {
+            NewChat();
+        }
 
         StartMesh();
     }
@@ -825,9 +892,27 @@ appTools,
         };
     }
 
-    private async Task<RemoteTaskResult> HandleIncomingRemoteTaskAsync(IncomingRemoteTask task,
+    private Task<RemoteTaskResult> HandleIncomingOrchestratedTaskAsync(IncomingOrchestratedTask task,
                                                                        CancellationToken cancellationToken)
     {
+        var adapted = new IncomingRemoteTask(task.JobId,
+                                             task.CallerNode,
+                                             task.Prompt,
+                                             task.ReportProgress,
+                                             task.RequestApprovalAsync);
+        return ExecuteIncomingRemoteTaskAsync(adapted, task.CallContext, cancellationToken);
+    }
+
+    private Task<RemoteTaskResult> HandleIncomingRemoteTaskAsync(IncomingRemoteTask task,
+                                                                 CancellationToken cancellationToken) =>
+        ExecuteIncomingRemoteTaskAsync(task, null, cancellationToken);
+
+    private async Task<RemoteTaskResult> ExecuteIncomingRemoteTaskAsync(IncomingRemoteTask task,
+                                                                        MeshCallContext? callContext,
+                                                                        CancellationToken cancellationToken)
+    {
+        var previousContext = _currentCallContext.Value;
+        _currentCallContext.Value = callContext;
         RemoteRequestReceived?.Invoke(task.CallerNode, task.Prompt);
         var tools = new List<string>();
         try
@@ -845,6 +930,21 @@ appTools,
                                             () => { },
                                             _ => { },
                                             Settings.Chat.AllowedPrivateHosts);
+            if (Settings.Chat.Mesh.IsEnabled)
+            {
+                ToolRegistration.Add(catalog,
+                                     new MeshTools(() => _meshNode,
+                                                   () => _meshFiles,
+                                                   () => _meshArtifacts,
+                                                   () => _meshOrchestrator,
+                                                   () => EffectiveMeshNodeName,
+                                                   () => _currentCallContext.Value,
+                                                   tool =>
+                                                   {
+                                                       task.ReportToolStarted(tool);
+                                                       RemoteToolStarted?.Invoke(task.CallerNode, tool);
+                                                   }));
+            }
             var audit = new ToolStartAuditLog(new JsonlAuditLog(Path.Combine(DataFolder, "logs")),
                                               tool =>
                                               {
@@ -897,6 +997,10 @@ appTools,
             TryAppendHistory(ChatDirection.Incoming, task.CallerNode, task.Prompt, ex.Message, RunStatus.Failed, 0, tools);
             RemoteResponseSent?.Invoke(task.CallerNode, RunStatus.Failed, ex.Message);
             throw;
+        }
+        finally
+        {
+            _currentCallContext.Value = previousContext;
         }
     }
 

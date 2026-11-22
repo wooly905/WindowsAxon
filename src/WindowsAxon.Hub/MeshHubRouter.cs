@@ -4,13 +4,21 @@ using WindowsAxon.Mesh;
 
 namespace WindowsAxon.Hub;
 
-/// <summary>Routes registration, peer presence, tasks, approvals, and cancellations between connected WindowsAxon nodes.</summary>
+/// <summary>Routes registration, peer presence, legacy tasks, generic RPCs, binary streams, and broadcasts.</summary>
 public sealed class MeshHubRouter
 {
     private readonly ConcurrentDictionary<string, ConnectedNode> _nodes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ActiveTask> _tasks = new();
+    private readonly ConcurrentDictionary<string, ActiveRoute> _rpcs = new();
+    private readonly ConcurrentDictionary<string, ActiveStreamRoute> _streams = new();
 
-    public IReadOnlyList<string> OnlineNodes => [.. _nodes.Values.Select(n => n.Name).Order(StringComparer.OrdinalIgnoreCase)];
+    public IReadOnlyList<string> OnlineNodes =>
+        [.. _nodes.Values.Select(n => n.Name).Order(StringComparer.OrdinalIgnoreCase)];
+
+    public IReadOnlyList<PeerInfo> OnlinePeerInfos =>
+        [.. _nodes.Values
+            .OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(n => new PeerInfo(n.NodeId, n.Name, n.Capabilities, n.ConnectedUtc))];
 
     public async Task HandleConnectionAsync(WebSocket socket, CancellationToken cancellationToken)
     {
@@ -24,25 +32,30 @@ public sealed class MeshHubRouter
                 || string.IsNullOrWhiteSpace(register.NodeName))
             {
                 await TrySendAsync(channel,
-                                   MeshEnvelope.Create(MeshMessageTypes.Error, new ErrorPayload("invalid_register", "First message must be a valid register payload.")),
+                                   MeshEnvelope.Create(MeshMessageTypes.Error,
+                                                       new ErrorPayload("invalid_register", "First message must be a valid register payload.")),
                                    cancellationToken);
                 await channel.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Invalid registration", cancellationToken);
                 return;
             }
 
             var nodeName = register.NodeName.Trim();
-            var node = new ConnectedNode(nodeName, channel);
+            var nodeId = string.IsNullOrWhiteSpace(register.NodeId) ? $"legacy-{Guid.NewGuid():N}" : register.NodeId.Trim();
+            var capabilities = register.Capabilities ?? PeerCapabilities.Default;
+            var node = new ConnectedNode(nodeName, nodeId, capabilities, DateTimeOffset.UtcNow, channel);
             if (!_nodes.TryAdd(nodeName, node))
             {
                 await TrySendAsync(channel,
-                                   MeshEnvelope.Create(MeshMessageTypes.Error, new ErrorPayload("duplicate_node", $"Node name '{nodeName}' is already connected.")),
+                                   MeshEnvelope.Create(MeshMessageTypes.Error,
+                                                       new ErrorPayload("duplicate_node", $"Node name '{nodeName}' is already connected.")),
                                    cancellationToken);
                 await channel.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Duplicate node name", cancellationToken);
                 return;
             }
 
             registeredName = nodeName;
-            await channel.SendAsync(MeshEnvelope.Create(MeshMessageTypes.Registered, new RegisteredPayload(nodeName, OnlineNodes)),
+            await channel.SendAsync(MeshEnvelope.Create(MeshMessageTypes.Registered,
+                                                        new RegisteredPayload(nodeName, OnlineNodes, OnlinePeerInfos)),
                                     cancellationToken);
             await BroadcastPeersAsync(excludeNode: nodeName, cancellationToken);
 
@@ -68,7 +81,7 @@ public sealed class MeshHubRouter
             if (registeredName is not null)
             {
                 _nodes.TryRemove(registeredName, out _);
-                await CleanupTasksForDisconnectedNodeAsync(registeredName);
+                await CleanupForDisconnectedNodeAsync(registeredName);
                 await BroadcastPeersAsync(excludeNode: null, CancellationToken.None);
             }
         }
@@ -134,6 +147,98 @@ public sealed class MeshHubRouter
                     await TrySendAsync(callerForDone.Channel, envelope, cancellationToken);
                 }
                 break;
+
+            case MeshMessageTypes.RpcRequest:
+                if (envelope.DeserializePayload<RpcRequestPayload>() is { } rpcReq)
+                {
+                    await HandleRpcRequestAsync(sender, rpcReq, cancellationToken);
+                }
+                break;
+
+            case MeshMessageTypes.RpcEvent:
+                if (envelope.DeserializePayload<RpcEventPayload>() is { } rpcEvent
+                    && _rpcs.TryGetValue(rpcEvent.CorrelationId, out var rpcForEvent)
+                    && string.Equals(rpcForEvent.TargetNode, sender.Name, StringComparison.OrdinalIgnoreCase)
+                    && _nodes.TryGetValue(rpcForEvent.CallerNode, out var callerForRpcEvent))
+                {
+                    await TrySendAsync(callerForRpcEvent.Channel, envelope, cancellationToken);
+                }
+                break;
+
+            case MeshMessageTypes.RpcCancel:
+                if (envelope.DeserializePayload<RpcCancelPayload>() is { } rpcCancel
+                    && _rpcs.TryGetValue(rpcCancel.CorrelationId, out var rpcForCancel)
+                    && string.Equals(rpcForCancel.CallerNode, sender.Name, StringComparison.OrdinalIgnoreCase)
+                    && _nodes.TryGetValue(rpcForCancel.TargetNode, out var targetForRpcCancel))
+                {
+                    await TrySendAsync(targetForRpcCancel.Channel, envelope, cancellationToken);
+                }
+                break;
+
+            case MeshMessageTypes.RpcResponse:
+                if (envelope.DeserializePayload<RpcResponsePayload>() is { } rpcResp
+                    && _rpcs.TryRemove(rpcResp.CorrelationId, out var rpcForResp)
+                    && string.Equals(rpcForResp.TargetNode, sender.Name, StringComparison.OrdinalIgnoreCase)
+                    && _nodes.TryGetValue(rpcForResp.CallerNode, out var callerForRpcResp))
+                {
+                    await TrySendAsync(callerForRpcResp.Channel, envelope, cancellationToken);
+                }
+                break;
+
+            case MeshMessageTypes.StreamOpen:
+                if (envelope.DeserializePayload<StreamOpenPayload>() is { } streamOpen)
+                {
+                    await HandleStreamOpenAsync(sender, streamOpen, cancellationToken);
+                }
+                break;
+
+            case MeshMessageTypes.StreamAccept:
+                if (envelope.DeserializePayload<StreamAcceptPayload>() is { } streamAccept
+                    && _streams.TryGetValue(streamAccept.StreamId, out var streamForAccept)
+                    && string.Equals(streamForAccept.TargetNode, sender.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!streamAccept.Accepted)
+                    {
+                        _streams.TryRemove(streamAccept.StreamId, out _);
+                    }
+
+                    if (_nodes.TryGetValue(streamForAccept.CallerNode, out var callerForAccept))
+                    {
+                        await TrySendAsync(callerForAccept.Channel, envelope, cancellationToken);
+                    }
+                }
+                break;
+
+            case MeshMessageTypes.StreamChunk:
+                if (envelope.DeserializePayload<StreamChunkPayload>() is { } streamChunk
+                    && _streams.TryGetValue(streamChunk.StreamId, out var streamForChunk)
+                    && TryGetStreamPeer(streamForChunk, sender.Name, out var peerForChunk))
+                {
+                    await TrySendAsync(peerForChunk.Channel, envelope, cancellationToken);
+                }
+                break;
+
+            case MeshMessageTypes.StreamClose:
+                if (envelope.DeserializePayload<StreamClosePayload>() is { } streamClose
+                    && _streams.TryGetValue(streamClose.StreamId, out var streamForClose)
+                    && TryGetStreamPeer(streamForClose, sender.Name, out var peerForClose))
+                {
+                    var isCaller = string.Equals(streamForClose.CallerNode, sender.Name, StringComparison.OrdinalIgnoreCase);
+                    if (!streamClose.Success || streamForClose.MarkClosed(isCaller))
+                    {
+                        _streams.TryRemove(streamClose.StreamId, out _);
+                    }
+
+                    await TrySendAsync(peerForClose.Channel, envelope, cancellationToken);
+                }
+                break;
+
+            case MeshMessageTypes.Broadcast:
+                if (envelope.DeserializePayload<BroadcastPayload>() is { } broadcast)
+                {
+                    await HandleBroadcastAsync(sender, broadcast, cancellationToken);
+                }
+                break;
         }
     }
 
@@ -174,7 +279,136 @@ public sealed class MeshHubRouter
         }
     }
 
-    private async Task CleanupTasksForDisconnectedNodeAsync(string nodeName)
+    private async Task HandleRpcRequestAsync(ConnectedNode caller, RpcRequestPayload request, CancellationToken cancellationToken)
+    {
+        if (request.HopCount > MeshCallContext.DefaultMaxHops)
+        {
+            await TrySendAsync(caller.Channel,
+                               MeshEnvelope.Create(MeshMessageTypes.RpcResponse,
+                                                   new RpcResponsePayload(request.CorrelationId,
+                                                                          false,
+                                                                          MeshEnvelope.EmptyObject,
+                                                                          $"Mesh hop limit ({MeshCallContext.DefaultMaxHops}) exceeded.")),
+                               cancellationToken);
+            return;
+        }
+
+        if (!_nodes.TryGetValue(request.TargetNode, out var target))
+        {
+            await TrySendAsync(caller.Channel,
+                               MeshEnvelope.Create(MeshMessageTypes.RpcResponse,
+                                                   new RpcResponsePayload(request.CorrelationId,
+                                                                          false,
+                                                                          MeshEnvelope.EmptyObject,
+                                                                          $"Peer '{request.TargetNode}' is not online.")),
+                               cancellationToken);
+            return;
+        }
+
+        var normalized = request with { CallerNode = caller.Name, TargetNode = target.Name };
+        if (!_rpcs.TryAdd(normalized.CorrelationId, new ActiveRoute(caller.Name, target.Name)))
+        {
+            return;
+        }
+
+        var sent = await TrySendAsync(target.Channel,
+                                      MeshEnvelope.Create(MeshMessageTypes.RpcRequest, normalized),
+                                      cancellationToken);
+        if (!sent && _rpcs.TryRemove(normalized.CorrelationId, out _))
+        {
+            await TrySendAsync(caller.Channel,
+                               MeshEnvelope.Create(MeshMessageTypes.RpcResponse,
+                                                   new RpcResponsePayload(normalized.CorrelationId,
+                                                                          false,
+                                                                          MeshEnvelope.EmptyObject,
+                                                                          $"Peer '{target.Name}' disconnected before receiving the request.")),
+                               cancellationToken);
+        }
+    }
+
+    private async Task HandleStreamOpenAsync(ConnectedNode caller, StreamOpenPayload open, CancellationToken cancellationToken)
+    {
+        if (open.HopCount > MeshCallContext.DefaultMaxHops)
+        {
+            await TrySendAsync(caller.Channel,
+                               MeshEnvelope.Create(MeshMessageTypes.StreamAccept,
+                                                   new StreamAcceptPayload(open.StreamId,
+                                                                           false,
+                                                                           MeshEnvelope.EmptyObject,
+                                                                           $"Mesh hop limit ({MeshCallContext.DefaultMaxHops}) exceeded.")),
+                               cancellationToken);
+            return;
+        }
+
+        if (!_nodes.TryGetValue(open.TargetNode, out var target))
+        {
+            await TrySendAsync(caller.Channel,
+                               MeshEnvelope.Create(MeshMessageTypes.StreamAccept,
+                                                   new StreamAcceptPayload(open.StreamId,
+                                                                           false,
+                                                                           MeshEnvelope.EmptyObject,
+                                                                           $"Peer '{open.TargetNode}' is not online.")),
+                               cancellationToken);
+            return;
+        }
+
+        var normalized = open with { CallerNode = caller.Name, TargetNode = target.Name };
+        if (!_streams.TryAdd(normalized.StreamId, new ActiveStreamRoute(caller.Name, target.Name)))
+        {
+            return;
+        }
+
+        var sent = await TrySendAsync(target.Channel,
+                                      MeshEnvelope.Create(MeshMessageTypes.StreamOpen, normalized),
+                                      cancellationToken);
+        if (!sent && _streams.TryRemove(normalized.StreamId, out _))
+        {
+            await TrySendAsync(caller.Channel,
+                               MeshEnvelope.Create(MeshMessageTypes.StreamAccept,
+                                                   new StreamAcceptPayload(normalized.StreamId,
+                                                                           false,
+                                                                           MeshEnvelope.EmptyObject,
+                                                                           $"Peer '{target.Name}' disconnected before accepting the stream.")),
+                               cancellationToken);
+        }
+    }
+
+    private async Task HandleBroadcastAsync(ConnectedNode sender, BroadcastPayload broadcast, CancellationToken cancellationToken)
+    {
+        if (broadcast.HopCount > MeshCallContext.DefaultMaxHops)
+        {
+            return;
+        }
+
+        var normalized = broadcast with { CallerNode = sender.Name };
+        var envelope = MeshEnvelope.Create(MeshMessageTypes.Broadcast, normalized);
+        var recipients = _nodes.Values
+            .Where(n => !string.Equals(n.Name, sender.Name, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        await Task.WhenAll(recipients.Select(n => TrySendAsync(n.Channel, envelope, cancellationToken)));
+    }
+
+    private bool TryGetStreamPeer(ActiveStreamRoute route, string senderName, out ConnectedNode peer)
+    {
+        string peerName;
+        if (string.Equals(route.CallerNode, senderName, StringComparison.OrdinalIgnoreCase))
+        {
+            peerName = route.TargetNode;
+        }
+        else if (string.Equals(route.TargetNode, senderName, StringComparison.OrdinalIgnoreCase))
+        {
+            peerName = route.CallerNode;
+        }
+        else
+        {
+            peer = null!;
+            return false;
+        }
+
+        return _nodes.TryGetValue(peerName, out peer!);
+    }
+
+    private async Task CleanupForDisconnectedNodeAsync(string nodeName)
     {
         foreach (var (taskId, task) in _tasks)
         {
@@ -201,11 +435,63 @@ public sealed class MeshHubRouter
                 }
             }
         }
+
+        foreach (var (corrId, route) in _rpcs)
+        {
+            if (string.Equals(route.TargetNode, nodeName, StringComparison.OrdinalIgnoreCase))
+            {
+                if (_rpcs.TryRemove(corrId, out _) && _nodes.TryGetValue(route.CallerNode, out var caller))
+                {
+                    await TrySendAsync(caller.Channel,
+                                       MeshEnvelope.Create(MeshMessageTypes.RpcResponse,
+                                                           new RpcResponsePayload(corrId,
+                                                                                  false,
+                                                                                  MeshEnvelope.EmptyObject,
+                                                                                  $"Peer '{nodeName}' disconnected.")),
+                                       CancellationToken.None);
+                }
+            }
+            else if (string.Equals(route.CallerNode, nodeName, StringComparison.OrdinalIgnoreCase))
+            {
+                if (_rpcs.TryRemove(corrId, out _) && _nodes.TryGetValue(route.TargetNode, out var target))
+                {
+                    await TrySendAsync(target.Channel,
+                                       MeshEnvelope.Create(MeshMessageTypes.RpcCancel, new RpcCancelPayload(corrId)),
+                                       CancellationToken.None);
+                }
+            }
+        }
+
+        foreach (var (streamId, route) in _streams)
+        {
+            var isCaller = string.Equals(route.CallerNode, nodeName, StringComparison.OrdinalIgnoreCase);
+            var isTarget = string.Equals(route.TargetNode, nodeName, StringComparison.OrdinalIgnoreCase);
+            if (!isCaller && !isTarget)
+            {
+                continue;
+            }
+
+            if (_streams.TryRemove(streamId, out _))
+            {
+                var otherName = isCaller ? route.TargetNode : route.CallerNode;
+                if (_nodes.TryGetValue(otherName, out var other))
+                {
+                    await TrySendAsync(other.Channel,
+                                       MeshEnvelope.Create(MeshMessageTypes.StreamClose,
+                                                           new StreamClosePayload(streamId,
+                                                                                  false,
+                                                                                  MeshEnvelope.EmptyObject,
+                                                                                  $"Peer '{nodeName}' disconnected during stream transfer.")),
+                                       CancellationToken.None);
+                }
+            }
+        }
     }
 
     private async Task BroadcastPeersAsync(string? excludeNode, CancellationToken cancellationToken)
     {
-        var envelope = MeshEnvelope.Create(MeshMessageTypes.PeersUpdated, new PeersUpdatedPayload(OnlineNodes));
+        var envelope = MeshEnvelope.Create(MeshMessageTypes.PeersUpdated,
+                                           new PeersUpdatedPayload(OnlineNodes, OnlinePeerInfos));
         var recipients = _nodes.Values
             .Where(n => excludeNode is null || !string.Equals(n.Name, excludeNode, StringComparison.OrdinalIgnoreCase))
             .ToList();
@@ -227,8 +513,37 @@ public sealed class MeshHubRouter
         }
     }
 
-    private sealed record ConnectedNode(string Name, WebSocketJsonChannel Channel);
+    private sealed record ConnectedNode(string Name,
+                                        string NodeId,
+                                        PeerCapabilities Capabilities,
+                                        DateTimeOffset ConnectedUtc,
+                                        WebSocketJsonChannel Channel);
 
     private sealed record ActiveTask(string TaskId, string CallerNode, string TargetNode);
-}
 
+    private sealed record ActiveRoute(string CallerNode, string TargetNode);
+
+    private sealed class ActiveStreamRoute(string callerNode, string targetNode)
+    {
+        private int _callerClosed;
+        private int _targetClosed;
+
+        public string CallerNode { get; } = callerNode;
+
+        public string TargetNode { get; } = targetNode;
+
+        public bool MarkClosed(bool isCaller)
+        {
+            if (isCaller)
+            {
+                Volatile.Write(ref _callerClosed, 1);
+            }
+            else
+            {
+                Volatile.Write(ref _targetClosed, 1);
+            }
+
+            return Volatile.Read(ref _callerClosed) != 0 && Volatile.Read(ref _targetClosed) != 0;
+        }
+    }
+}

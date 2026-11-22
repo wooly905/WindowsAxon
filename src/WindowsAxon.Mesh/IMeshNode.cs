@@ -1,20 +1,8 @@
 namespace WindowsAxon.Mesh;
 
 /// <summary>Common contract for a distributed WindowsAxon node (central hub or LAN peer-to-peer).</summary>
-public interface IMeshNode : IAsyncDisposable
+public interface IMeshNode : IMeshTransport
 {
-    string NodeName { get; }
-
-    MeshConnectionState State { get; }
-
-    string StatusMessage { get; }
-
-    IReadOnlyList<string> OnlinePeers { get; }
-
-    event Action<IReadOnlyList<string>>? PeersChanged;
-
-    event Action<MeshConnectionState, string>? ConnectionStateChanged;
-
     void Start();
 
     Task<RemoteTaskResult> RunRemoteTaskAsync(string targetNode,

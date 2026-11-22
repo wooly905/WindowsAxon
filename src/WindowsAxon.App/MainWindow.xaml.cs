@@ -16,6 +16,7 @@ namespace WindowsAxon.App;
 public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPrompter
 {
     private readonly DesktopChatService _service;
+    private readonly SemaphoreSlim _promptLock = new(1, 1);
     private ContentDialog? _activeDialog;
     private TaskCompletionSource<ContentDialogResult>? _promptCompletion;
     private static readonly TimeSpan UpdateCheckDelay = TimeSpan.FromSeconds(30);
@@ -55,6 +56,10 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         _service.RemoteRequestReceived += (caller, prompt) => DispatcherQueue.TryEnqueue(() => ViewModel.ShowRemoteRequest(caller, prompt));
         _service.RemoteToolStarted += (caller, tool) => DispatcherQueue.TryEnqueue(() => ViewModel.ShowRemoteTool(caller, tool));
         _service.RemoteResponseSent += (caller, status, text) => DispatcherQueue.TryEnqueue(() => ViewModel.ShowRemoteResponse(caller, status, text));
+        _service.FileReceived += info => DispatcherQueue.TryEnqueue(() => ViewModel.ShowRemoteFileReceived(info.CallerNode,
+                                                                                                           info.FileName,
+                                                                                                           info.SizeBytes,
+                                                                                                           info.SavedPath));
         ViewModel.PropertyChanged += (_, e) =>
         {
             // Deferred so the x:Bind IsEnabled update re-enables the TextBox first.
@@ -71,7 +76,12 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         InitializeComponent();
         RefreshOnlinePeers(_service.OnlinePeers);
         RefreshMeshStatus();
-        _pruneTimer.Tick += (_, _) => ViewModel.PruneExpired();
+        _service.PruneExpiredArtifacts();
+        _pruneTimer.Tick += (_, _) =>
+        {
+            ViewModel.PruneExpired();
+            _service.PruneExpiredArtifacts();
+        };
         _pruneTimer.Start();
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1000, 900));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "WindowsAxon.ico"));
@@ -328,26 +338,34 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
                                                             string close,
                                                             CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        var completion = new TaskCompletionSource<ContentDialogResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _promptCompletion = completion;
-        PromptTitle.Text = title;
-        PromptText.Text = text;
-        PromptPrimary.Content = primary;
-        PromptSecondary.Content = secondary;
-        PromptSecondary.Visibility = string.IsNullOrEmpty(secondary) ? Visibility.Collapsed : Visibility.Visible;
-        PromptClose.Content = close;
-        PromptPanel.Visibility = Visibility.Visible;
-        PromptClose.Focus(FocusState.Programmatic);
-        using var registration = cancellationToken.Register(() => completion.TrySetCanceled(cancellationToken));
+        await _promptLock.WaitAsync(cancellationToken);
         try
         {
-            return await completion.Task;
+            cancellationToken.ThrowIfCancellationRequested();
+            var completion = new TaskCompletionSource<ContentDialogResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _promptCompletion = completion;
+            PromptTitle.Text = title;
+            PromptText.Text = text;
+            PromptPrimary.Content = primary;
+            PromptSecondary.Content = secondary;
+            PromptSecondary.Visibility = string.IsNullOrEmpty(secondary) ? Visibility.Collapsed : Visibility.Visible;
+            PromptClose.Content = close;
+            PromptPanel.Visibility = Visibility.Visible;
+            PromptClose.Focus(FocusState.Programmatic);
+            using var registration = cancellationToken.Register(() => completion.TrySetCanceled(cancellationToken));
+            try
+            {
+                return await completion.Task;
+            }
+            finally
+            {
+                PromptPanel.Visibility = Visibility.Collapsed;
+                _promptCompletion = null;
+            }
         }
         finally
         {
-            PromptPanel.Visibility = Visibility.Collapsed;
-            _promptCompletion = null;
+            _promptLock.Release();
         }
     }
 

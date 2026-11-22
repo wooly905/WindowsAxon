@@ -22,18 +22,23 @@ public sealed record PeerMeshOptions
     public bool LoopbackOnly { get; init; }
 }
 
-/// <summary>LAN peer-to-peer WindowsAxon mesh node using pair-key authenticated discovery and encrypted TCP tasks.</summary>
+/// <summary>LAN peer-to-peer WindowsAxon mesh node using pair-key authenticated discovery and encrypted TCP channels.</summary>
 public sealed class PeerMeshNode : IMeshNode
 {
     private const int BeaconVersion = 1;
 
     private readonly string _rawNodeName;
-    private readonly string _instanceId = Guid.NewGuid().ToString("N");
+    private readonly string _instanceId;
+    private readonly PeerCapabilities _capabilities;
+    private readonly DateTimeOffset _onlineSinceUtc = DateTimeOffset.UtcNow;
     private readonly PairKeyCrypto _crypto;
     private readonly Func<IncomingRemoteTask, CancellationToken, Task<RemoteTaskResult>> _incomingHandler;
     private readonly PeerMeshOptions _options;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ConcurrentDictionary<string, DiscoveredPeer> _discovered = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Func<IncomingRpc, CancellationToken, Task<RpcResult>>> _rpcHandlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Func<IncomingStream, CancellationToken, Task>> _streamHandlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Func<IncomingBroadcast, CancellationToken, Task>> _broadcastHandlers = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _peersLock = new();
 
     private TcpListener? _tcpListener;
@@ -49,6 +54,7 @@ public sealed class PeerMeshNode : IMeshNode
 
     private volatile string _effectiveNodeName;
     private volatile IReadOnlyList<string> _peers = [];
+    private volatile IReadOnlyList<PeerInfo> _peerInfos = [];
     private volatile IReadOnlyDictionary<string, DiscoveredPeer> _peersByDisplayName = new Dictionary<string, DiscoveredPeer>(StringComparer.OrdinalIgnoreCase);
     private MeshConnectionState _state = MeshConnectionState.Disconnected;
     private string _statusMessage = "Disconnected";
@@ -57,7 +63,9 @@ public sealed class PeerMeshNode : IMeshNode
     public PeerMeshNode(string nodeName,
                         string pairKey,
                         Func<IncomingRemoteTask, CancellationToken, Task<RemoteTaskResult>> incomingHandler,
-                        PeerMeshOptions? options = null)
+                        PeerMeshOptions? options = null,
+                        PeerCapabilities? capabilities = null,
+                        string? nodeId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(nodeName);
         ArgumentException.ThrowIfNullOrWhiteSpace(pairKey);
@@ -65,12 +73,18 @@ public sealed class PeerMeshNode : IMeshNode
 
         _rawNodeName = nodeName.Trim();
         _effectiveNodeName = _rawNodeName;
+        _instanceId = string.IsNullOrWhiteSpace(nodeId) ? Guid.NewGuid().ToString("N") : nodeId.Trim();
+        _capabilities = capabilities ?? PeerCapabilities.Default;
         _crypto = new PairKeyCrypto(pairKey);
         _incomingHandler = incomingHandler;
         _options = options ?? new PeerMeshOptions();
     }
 
+    public string NodeId => _instanceId;
+
     public string NodeName => _effectiveNodeName;
+
+    public PeerCapabilities LocalCapabilities => _capabilities;
 
     public MeshConnectionState State => _state;
 
@@ -78,11 +92,36 @@ public sealed class PeerMeshNode : IMeshNode
 
     public IReadOnlyList<string> OnlinePeers => _peers;
 
+    public IReadOnlyList<PeerInfo> PeerInfos => _peerInfos;
+
     internal int ListeningPort => _tcpPort;
 
     public event Action<IReadOnlyList<string>>? PeersChanged;
 
+    public event Action<IReadOnlyList<PeerInfo>>? PeerInfosChanged;
+
     public event Action<MeshConnectionState, string>? ConnectionStateChanged;
+
+    public void RegisterRpcHandler(string topic, Func<IncomingRpc, CancellationToken, Task<RpcResult>> handler)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(topic);
+        ArgumentNullException.ThrowIfNull(handler);
+        _rpcHandlers[topic.Trim()] = handler;
+    }
+
+    public void RegisterStreamHandler(string topic, Func<IncomingStream, CancellationToken, Task> handler)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(topic);
+        ArgumentNullException.ThrowIfNull(handler);
+        _streamHandlers[topic.Trim()] = handler;
+    }
+
+    public void RegisterBroadcastHandler(string topic, Func<IncomingBroadcast, CancellationToken, Task> handler)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(topic);
+        ArgumentNullException.ThrowIfNull(handler);
+        _broadcastHandlers[topic.Trim()] = handler;
+    }
 
     public void Start()
     {
@@ -133,12 +172,11 @@ public sealed class PeerMeshNode : IMeshNode
             return new RemoteTaskResult(RemoteRunStatus.Failed, $"Peer '{targetNode}' is not online.", 0);
         }
 
-        using var tcp = new TcpClient();
+        TcpClient tcp;
+        EncryptedJsonChannel channel;
         try
         {
-            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-            connectCts.CancelAfter(_options.ConnectTimeout);
-            await tcp.ConnectAsync(peer.Address, peer.TcpPort, connectCts.Token);
+            (tcp, channel) = await ConnectToPeerAsync(peer, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -149,20 +187,7 @@ public sealed class PeerMeshNode : IMeshNode
             return new RemoteTaskResult(RemoteRunStatus.Failed, $"Could not reach peer '{targetNode}': {ex.Message}", 0);
         }
 
-        EncryptedJsonChannel channel;
-        try
-        {
-            channel = await EncryptedJsonChannel.ConnectClientAsync(tcp.GetStream(), _crypto, cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            return new RemoteTaskResult(RemoteRunStatus.Cancelled, "Stopped.", 0);
-        }
-        catch (Exception ex)
-        {
-            return new RemoteTaskResult(RemoteRunStatus.Failed, $"Could not authenticate with peer '{targetNode}': {ex.Message}", 0);
-        }
-
+        using (tcp)
         using (channel)
         {
             var taskId = Guid.NewGuid().ToString("N");
@@ -244,6 +269,292 @@ public sealed class PeerMeshNode : IMeshNode
         }
     }
 
+    public async Task<RpcResult> InvokeRpcAsync(string targetNode,
+                                                string topic,
+                                                JsonElement payload,
+                                                Action<string, JsonElement>? onEvent = null,
+                                                MeshCallContext? context = null,
+                                                CancellationToken cancellationToken = default)
+    {
+        if (_state != MeshConnectionState.Connected)
+        {
+            return RpcResult.Fail("Peer-to-peer network is not active.");
+        }
+
+        if (!_peersByDisplayName.TryGetValue(targetNode, out var peer))
+        {
+            return RpcResult.Fail($"Peer '{targetNode}' is not online.");
+        }
+
+        var callCtx = context is null ? MeshCallContext.CreateRoot(_effectiveNodeName) : context.NextHop(_effectiveNodeName);
+        TcpClient tcp;
+        EncryptedJsonChannel channel;
+        try
+        {
+            (tcp, channel) = await ConnectToPeerAsync(peer, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return RpcResult.Fail($"Could not reach peer '{targetNode}': {ex.Message}");
+        }
+
+        using (tcp)
+        using (channel)
+        {
+            var corrId = Guid.NewGuid().ToString("N");
+            using var cancelReg = cancellationToken.Register(() =>
+                _ = TrySendAsync(channel,
+                                 MeshEnvelope.Create(MeshMessageTypes.RpcCancel, new RpcCancelPayload(corrId)),
+                                 CancellationToken.None));
+
+            try
+            {
+                await channel.SendAsync(MeshEnvelope.Create(MeshMessageTypes.RpcRequest,
+                                                            new RpcRequestPayload(corrId,
+                                                                                  _effectiveNodeName,
+                                                                                  targetNode,
+                                                                                  topic,
+                                                                                  payload,
+                                                                                  callCtx.TraceId,
+                                                                                  callCtx.HopCount)),
+                                        cancellationToken);
+
+                while (!cancellationToken.IsCancellationRequested && !_lifetime.IsCancellationRequested)
+                {
+                    var envelope = await channel.ReceiveAsync(cancellationToken);
+                    if (envelope is null)
+                    {
+                        return RpcResult.Fail($"Peer '{targetNode}' disconnected.");
+                    }
+
+                    switch (envelope.Type)
+                    {
+                        case MeshMessageTypes.RpcEvent:
+                            if (envelope.DeserializePayload<RpcEventPayload>() is { } ev
+                                && string.Equals(ev.CorrelationId, corrId, StringComparison.Ordinal))
+                            {
+                                onEvent?.Invoke(ev.EventName, ev.Payload);
+                            }
+                            break;
+
+                        case MeshMessageTypes.RpcResponse:
+                            if (envelope.DeserializePayload<RpcResponsePayload>() is { } resp
+                                && string.Equals(resp.CorrelationId, corrId, StringComparison.Ordinal))
+                            {
+                                return new RpcResult(resp.Success, resp.Payload, resp.Error);
+                            }
+                            break;
+                    }
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                return RpcResult.Fail("Node shutting down.");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return RpcResult.Fail($"RPC '{topic}' to '{targetNode}' failed: {ex.Message}");
+            }
+        }
+    }
+
+    public async Task<IMeshStream> OpenStreamAsync(string targetNode,
+                                                   string topic,
+                                                   JsonElement metadata,
+                                                   MeshCallContext? context = null,
+                                                   CancellationToken cancellationToken = default)
+    {
+        if (_state != MeshConnectionState.Connected)
+        {
+            throw new InvalidOperationException("Peer-to-peer network is not active.");
+        }
+
+        if (!_peersByDisplayName.TryGetValue(targetNode, out var peer))
+        {
+            throw new InvalidOperationException($"Peer '{targetNode}' is not online.");
+        }
+
+        var callCtx = context is null ? MeshCallContext.CreateRoot(_effectiveNodeName) : context.NextHop(_effectiveNodeName);
+        var (tcp, channel) = await ConnectToPeerAsync(peer, cancellationToken);
+        try
+        {
+            var streamId = Guid.NewGuid().ToString("N");
+            await channel.SendAsync(MeshEnvelope.Create(MeshMessageTypes.StreamOpen,
+                                                        new StreamOpenPayload(streamId,
+                                                                              _effectiveNodeName,
+                                                                              targetNode,
+                                                                              topic,
+                                                                              metadata,
+                                                                              callCtx.TraceId,
+                                                                              callCtx.HopCount)),
+                                    cancellationToken);
+
+            var reply = await channel.ReceiveAsync(cancellationToken);
+            if (reply is null
+                || reply.Type != MeshMessageTypes.StreamAccept
+                || reply.DeserializePayload<StreamAcceptPayload>() is not { } accept
+                || !string.Equals(accept.StreamId, streamId, StringComparison.Ordinal))
+            {
+                throw new IOException($"Peer '{targetNode}' closed the connection before accepting stream '{topic}'.");
+            }
+
+            if (!accept.Accepted)
+            {
+                throw new InvalidOperationException(accept.Error ?? $"Peer '{targetNode}' rejected stream '{topic}'.");
+            }
+
+            return AttachDedicatedStream(tcp, channel, streamId, topic, targetNode, callCtx, metadata, accept.Metadata);
+        }
+        catch
+        {
+            channel.Dispose();
+            tcp.Dispose();
+            throw;
+        }
+    }
+
+    public async Task BroadcastAsync(string topic,
+                                     JsonElement payload,
+                                     MeshCallContext? context = null,
+                                     CancellationToken cancellationToken = default)
+    {
+        if (_state != MeshConnectionState.Connected)
+        {
+            return;
+        }
+
+        var callCtx = context is null ? MeshCallContext.CreateRoot(_effectiveNodeName) : context.NextHop(_effectiveNodeName);
+        var envelope = MeshEnvelope.Create(MeshMessageTypes.Broadcast,
+                                           new BroadcastPayload(_effectiveNodeName, topic, payload, callCtx.TraceId, callCtx.HopCount));
+        var peers = _discovered.Values.ToList();
+        await Task.WhenAll(peers.Select(async peer =>
+        {
+            try
+            {
+                var (tcp, channel) = await ConnectToPeerAsync(peer, cancellationToken);
+                using (tcp)
+                using (channel)
+                {
+                    await channel.SendAsync(envelope, cancellationToken);
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }));
+    }
+
+    private MeshStream AttachDedicatedStream(TcpClient tcp,
+                                             EncryptedJsonChannel channel,
+                                             string streamId,
+                                             string topic,
+                                             string remoteNode,
+                                             MeshCallContext context,
+                                             JsonElement openMetadata,
+                                             JsonElement acceptMetadata)
+    {
+        var streamCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        Task? pumpTask = null;
+
+        var stream = new MeshStream(
+            streamId,
+            topic,
+            remoteNode,
+            context,
+            openMetadata,
+            acceptMetadata,
+            (env, ct) => channel.SendAsync(env, ct),
+            async () =>
+            {
+                await streamCts.CancelAsync();
+                channel.Dispose();
+                tcp.Dispose();
+                if (pumpTask is not null)
+                {
+                    try
+                    {
+                        await pumpTask;
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+
+                streamCts.Dispose();
+            });
+
+        pumpTask = Task.Run(async () =>
+        {
+            try
+            {
+                while (!streamCts.IsCancellationRequested)
+                {
+                    var env = await channel.ReceiveAsync(streamCts.Token);
+                    if (env is null)
+                    {
+                        stream.OnTransportFailure($"Peer '{remoteNode}' closed the stream connection.");
+                        return;
+                    }
+
+                    switch (env.Type)
+                    {
+                        case MeshMessageTypes.StreamChunk:
+                            if (env.DeserializePayload<StreamChunkPayload>() is { } chunk
+                                && string.Equals(chunk.StreamId, streamId, StringComparison.Ordinal))
+                            {
+                                await stream.DeliverChunkAsync(chunk, streamCts.Token);
+                            }
+                            break;
+
+                        case MeshMessageTypes.StreamClose:
+                            if (env.DeserializePayload<StreamClosePayload>() is { } close
+                                && string.Equals(close.StreamId, streamId, StringComparison.Ordinal))
+                            {
+                                stream.DeliverClose(close);
+                                return;
+                            }
+                            break;
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                stream.OnTransportFailure(ex.Message);
+            }
+        }, CancellationToken.None);
+
+        return stream;
+    }
+
+    private async Task<(TcpClient Tcp, EncryptedJsonChannel Channel)> ConnectToPeerAsync(DiscoveredPeer peer,
+                                                                                         CancellationToken cancellationToken)
+    {
+        var tcp = new TcpClient();
+        try
+        {
+            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+            connectCts.CancelAfter(_options.ConnectTimeout);
+            await tcp.ConnectAsync(peer.Address, peer.TcpPort, connectCts.Token);
+            var channel = await EncryptedJsonChannel.ConnectClientAsync(tcp.GetStream(), _crypto, cancellationToken);
+            return (tcp, channel);
+        }
+        catch
+        {
+            tcp.Dispose();
+            throw;
+        }
+    }
+
     private static async Task HandleCallerApprovalAsync(EncryptedJsonChannel channel,
                                                         TaskApprovalRequestPayload request,
                                                         Func<TaskApprovalRequestPayload, CancellationToken, Task<RemoteApprovalAnswer>> onApprovalRequested,
@@ -304,131 +615,370 @@ public sealed class PeerMeshNode : IMeshNode
 
     private async Task HandleIncomingConnectionAsync(TcpClient client, CancellationToken cancellationToken)
     {
-        using (client)
+        EncryptedJsonChannel channel;
+        try
         {
-            EncryptedJsonChannel channel;
+            channel = await EncryptedJsonChannel.AcceptServerAsync(client.GetStream(), _crypto, cancellationToken);
+        }
+        catch (Exception)
+        {
+            client.Dispose();
+            return;
+        }
+
+        MeshEnvelope? first;
+        try
+        {
+            first = await channel.ReceiveAsync(cancellationToken);
+        }
+        catch (Exception)
+        {
+            channel.Dispose();
+            client.Dispose();
+            return;
+        }
+
+        if (first is null)
+        {
+            channel.Dispose();
+            client.Dispose();
+            return;
+        }
+
+        if (first.Type == MeshMessageTypes.StreamOpen && first.DeserializePayload<StreamOpenPayload>() is { } streamOpen)
+        {
+            await HandleIncomingStreamAsync(client, channel, streamOpen, cancellationToken);
+            return;
+        }
+
+        using (client)
+        using (channel)
+        {
+            switch (first.Type)
+            {
+                case MeshMessageTypes.TaskDispatch:
+                    if (first.DeserializePayload<TaskDispatchPayload>() is { } dispatch)
+                    {
+                        await HandleIncomingTaskAsync(channel, dispatch, cancellationToken);
+                    }
+                    break;
+
+                case MeshMessageTypes.RpcRequest:
+                    if (first.DeserializePayload<RpcRequestPayload>() is { } rpcReq)
+                    {
+                        await HandleIncomingRpcAsync(channel, rpcReq, cancellationToken);
+                    }
+                    break;
+
+                case MeshMessageTypes.Broadcast:
+                    if (first.DeserializePayload<BroadcastPayload>() is { } broadcast)
+                    {
+                        await HandleIncomingBroadcastAsync(broadcast, cancellationToken);
+                    }
+                    break;
+            }
+        }
+    }
+
+    private async Task HandleIncomingStreamAsync(TcpClient client,
+                                                 EncryptedJsonChannel channel,
+                                                 StreamOpenPayload open,
+                                                 CancellationToken cancellationToken)
+    {
+        if (open.HopCount > MeshCallContext.DefaultMaxHops)
+        {
+            await TrySendAsync(channel,
+                               MeshEnvelope.Create(MeshMessageTypes.StreamAccept,
+                                                   new StreamAcceptPayload(open.StreamId,
+                                                                           false,
+                                                                           MeshEnvelope.EmptyObject,
+                                                                           $"Mesh hop limit ({MeshCallContext.DefaultMaxHops}) exceeded.")),
+                               CancellationToken.None);
+            channel.Dispose();
+            client.Dispose();
+            return;
+        }
+
+        if (!_streamHandlers.TryGetValue(open.Topic, out var handler))
+        {
+            await TrySendAsync(channel,
+                               MeshEnvelope.Create(MeshMessageTypes.StreamAccept,
+                                                   new StreamAcceptPayload(open.StreamId,
+                                                                           false,
+                                                                           MeshEnvelope.EmptyObject,
+                                                                           $"No stream handler registered for topic '{open.Topic}'.")),
+                               CancellationToken.None);
+            channel.Dispose();
+            client.Dispose();
+            return;
+        }
+
+        var acceptedStream = false;
+        var responded = 0;
+        var context = new MeshCallContext(open.CallerNode, open.TraceId, open.HopCount);
+        var incoming = new IncomingStream(
+            open.StreamId,
+            open.Topic,
+            open.Metadata,
+            context,
+            AcceptAsync: async (acceptMeta, ct) =>
+            {
+                if (Interlocked.Exchange(ref responded, 1) != 0)
+                {
+                    throw new InvalidOperationException("Stream has already been accepted or rejected.");
+                }
+
+                await channel.SendAsync(MeshEnvelope.Create(MeshMessageTypes.StreamAccept,
+                                                            new StreamAcceptPayload(open.StreamId, true, acceptMeta)),
+                                        ct);
+                acceptedStream = true;
+                return AttachDedicatedStream(client, channel, open.StreamId, open.Topic, open.CallerNode, context, open.Metadata, acceptMeta);
+            },
+            RejectAsync: async (error, ct) =>
+            {
+                if (Interlocked.Exchange(ref responded, 1) == 0)
+                {
+                    await TrySendAsync(channel,
+                                       MeshEnvelope.Create(MeshMessageTypes.StreamAccept,
+                                                           new StreamAcceptPayload(open.StreamId, false, MeshEnvelope.EmptyObject, error)),
+                                       ct);
+                }
+            });
+
+        try
+        {
+            await handler(incoming, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            if (Interlocked.Exchange(ref responded, 1) == 0)
+            {
+                await TrySendAsync(channel,
+                                   MeshEnvelope.Create(MeshMessageTypes.StreamAccept,
+                                                       new StreamAcceptPayload(open.StreamId, false, MeshEnvelope.EmptyObject, ex.Message)),
+                                   CancellationToken.None);
+            }
+        }
+        finally
+        {
+            if (!acceptedStream)
+            {
+                channel.Dispose();
+                client.Dispose();
+            }
+        }
+    }
+
+    private async Task HandleIncomingRpcAsync(EncryptedJsonChannel channel,
+                                              RpcRequestPayload request,
+                                              CancellationToken cancellationToken)
+    {
+        if (request.HopCount > MeshCallContext.DefaultMaxHops)
+        {
+            await TrySendAsync(channel,
+                               MeshEnvelope.Create(MeshMessageTypes.RpcResponse,
+                                                   new RpcResponsePayload(request.CorrelationId,
+                                                                          false,
+                                                                          MeshEnvelope.EmptyObject,
+                                                                          $"Mesh hop limit ({MeshCallContext.DefaultMaxHops}) exceeded.")),
+                               CancellationToken.None);
+            return;
+        }
+
+        if (!_rpcHandlers.TryGetValue(request.Topic, out var handler))
+        {
+            await TrySendAsync(channel,
+                               MeshEnvelope.Create(MeshMessageTypes.RpcResponse,
+                                                   new RpcResponsePayload(request.CorrelationId,
+                                                                          false,
+                                                                          MeshEnvelope.EmptyObject,
+                                                                          $"No RPC handler registered for topic '{request.Topic}'.")),
+                               CancellationToken.None);
+            return;
+        }
+
+        using var rpcCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var cancelWatch = Task.Run(async () =>
+        {
             try
             {
-                channel = await EncryptedJsonChannel.AcceptServerAsync(client.GetStream(), _crypto, cancellationToken);
+                while (!rpcCts.IsCancellationRequested)
+                {
+                    var env = await channel.ReceiveAsync(rpcCts.Token);
+                    if (env is null
+                        || (env.Type == MeshMessageTypes.RpcCancel
+                            && env.DeserializePayload<RpcCancelPayload>() is { } cancel
+                            && string.Equals(cancel.CorrelationId, request.CorrelationId, StringComparison.Ordinal)))
+                    {
+                        await rpcCts.CancelAsync();
+                        return;
+                    }
+                }
             }
             catch (Exception)
             {
-                return;
+                await rpcCts.CancelAsync();
             }
+        }, CancellationToken.None);
 
-            using (channel)
+        RpcResult result;
+        try
+        {
+            var incoming = new IncomingRpc(request.CorrelationId,
+                                           request.Topic,
+                                           request.Payload,
+                                           new MeshCallContext(request.CallerNode, request.TraceId, request.HopCount),
+                                           (eventName, eventPayload, ct) =>
+                                               channel.SendAsync(MeshEnvelope.Create(MeshMessageTypes.RpcEvent,
+                                                                                     new RpcEventPayload(request.CorrelationId,
+                                                                                                         eventName,
+                                                                                                         eventPayload)),
+                                                                 ct));
+            result = await handler(incoming, rpcCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            result = RpcResult.Fail("Cancelled.");
+        }
+        catch (Exception ex)
+        {
+            result = RpcResult.Fail(ex.Message);
+        }
+
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            await TrySendAsync(channel,
+                               MeshEnvelope.Create(MeshMessageTypes.RpcResponse,
+                                                   new RpcResponsePayload(request.CorrelationId, result.Success, result.Payload, result.Error)),
+                               CancellationToken.None);
+        }
+
+        await rpcCts.CancelAsync();
+        try
+        {
+            await cancelWatch;
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private async Task HandleIncomingBroadcastAsync(BroadcastPayload broadcast, CancellationToken cancellationToken)
+    {
+        if (broadcast.HopCount > MeshCallContext.DefaultMaxHops
+            || !_broadcastHandlers.TryGetValue(broadcast.Topic, out var handler))
+        {
+            return;
+        }
+
+        try
+        {
+            await handler(new IncomingBroadcast(broadcast.Topic,
+                                                broadcast.Payload,
+                                                new MeshCallContext(broadcast.CallerNode, broadcast.TraceId, broadcast.HopCount)),
+                          cancellationToken);
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private async Task HandleIncomingTaskAsync(EncryptedJsonChannel channel,
+                                               TaskDispatchPayload dispatch,
+                                               CancellationToken cancellationToken)
+    {
+        using var taskCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var pendingApprovals = new ConcurrentDictionary<string, TaskCompletionSource<RemoteApprovalAnswer>>();
+
+        var receiveLoop = Task.Run(async () =>
+        {
+            try
             {
-                MeshEnvelope? first;
-                try
+                while (!taskCts.IsCancellationRequested)
                 {
-                    first = await channel.ReceiveAsync(cancellationToken);
-                }
-                catch (Exception)
-                {
-                    return;
-                }
-
-                if (first is null
-                    || first.Type != MeshMessageTypes.TaskDispatch
-                    || first.DeserializePayload<TaskDispatchPayload>() is not { } dispatch)
-                {
-                    return;
-                }
-
-                using var taskCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                var pendingApprovals = new ConcurrentDictionary<string, TaskCompletionSource<RemoteApprovalAnswer>>();
-
-                var receiveLoop = Task.Run(async () =>
-                {
-                    try
+                    var envelope = await channel.ReceiveAsync(taskCts.Token);
+                    if (envelope is null)
                     {
-                        while (!taskCts.IsCancellationRequested)
-                        {
-                            var envelope = await channel.ReceiveAsync(taskCts.Token);
-                            if (envelope is null)
+                        await taskCts.CancelAsync();
+                        return;
+                    }
+
+                    switch (envelope.Type)
+                    {
+                        case MeshMessageTypes.TaskCancel:
+                            if (envelope.DeserializePayload<TaskCancelPayload>() is { } cancel
+                                && string.Equals(cancel.TaskId, dispatch.TaskId, StringComparison.Ordinal))
                             {
                                 await taskCts.CancelAsync();
                                 return;
                             }
+                            break;
 
-                            switch (envelope.Type)
+                        case MeshMessageTypes.TaskApprovalResponse:
+                            if (envelope.DeserializePayload<TaskApprovalResponsePayload>() is { } resp
+                                && pendingApprovals.TryRemove(resp.ApprovalId, out var pending))
                             {
-                                case MeshMessageTypes.TaskCancel:
-                                    if (envelope.DeserializePayload<TaskCancelPayload>() is { } cancel
-                                        && string.Equals(cancel.TaskId, dispatch.TaskId, StringComparison.Ordinal))
-                                    {
-                                        await taskCts.CancelAsync();
-                                        return;
-                                    }
-                                    break;
-
-                                case MeshMessageTypes.TaskApprovalResponse:
-                                    if (envelope.DeserializePayload<TaskApprovalResponsePayload>() is { } resp
-                                        && pendingApprovals.TryRemove(resp.ApprovalId, out var pending))
-                                    {
-                                        pending.TrySetResult(resp.Answer);
-                                    }
-                                    break;
+                                pending.TrySetResult(resp.Answer);
                             }
-                        }
+                            break;
                     }
-                    catch (OperationCanceledException)
-                    {
-                    }
-                    catch (Exception)
-                    {
-                        await taskCts.CancelAsync();
-                    }
-                }, CancellationToken.None);
-
-                RemoteTaskResult result;
-                try
-                {
-                    var incomingTask = new IncomingRemoteTask(dispatch.TaskId,
-                                                              dispatch.CallerNode,
-                                                              dispatch.Prompt,
-                                                              tool => _ = TrySendAsync(channel,
-                                                                                       MeshEnvelope.Create(MeshMessageTypes.TaskToolStarted,
-                                                                                                           new TaskToolStartedPayload(dispatch.TaskId, tool)),
-                                                                                       taskCts.Token),
-                                                              (req, ct) => RequestApprovalAsync(channel, pendingApprovals, req, ct));
-                    result = await _incomingHandler(incomingTask, taskCts.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    result = new RemoteTaskResult(RemoteRunStatus.Cancelled, "Stopped.", 0);
-                }
-                catch (Exception ex)
-                {
-                    result = new RemoteTaskResult(RemoteRunStatus.Failed, ex.Message, 0);
-                }
-                finally
-                {
-                    foreach (var (_, pending) in pendingApprovals)
-                    {
-                        pending.TrySetCanceled();
-                    }
-
-                    pendingApprovals.Clear();
-                }
-
-                if (!cancellationToken.IsCancellationRequested)
-                {
-                    await TrySendAsync(channel,
-                                       MeshEnvelope.Create(MeshMessageTypes.TaskComplete,
-                                                           new TaskCompletePayload(dispatch.TaskId, result.Status, result.Text, result.Steps)),
-                                       CancellationToken.None);
-                }
-
-                await taskCts.CancelAsync();
-                try
-                {
-                    await receiveLoop;
-                }
-                catch (OperationCanceledException)
-                {
                 }
             }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception)
+            {
+                await taskCts.CancelAsync();
+            }
+        }, CancellationToken.None);
+
+        RemoteTaskResult result;
+        try
+        {
+            var incomingTask = new IncomingRemoteTask(dispatch.TaskId,
+                                                      dispatch.CallerNode,
+                                                      dispatch.Prompt,
+                                                      tool => _ = TrySendAsync(channel,
+                                                                               MeshEnvelope.Create(MeshMessageTypes.TaskToolStarted,
+                                                                                                   new TaskToolStartedPayload(dispatch.TaskId, tool)),
+                                                                               taskCts.Token),
+                                                      (req, ct) => RequestApprovalAsync(channel, pendingApprovals, req, ct));
+            result = await _incomingHandler(incomingTask, taskCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            result = new RemoteTaskResult(RemoteRunStatus.Cancelled, "Stopped.", 0);
+        }
+        catch (Exception ex)
+        {
+            result = new RemoteTaskResult(RemoteRunStatus.Failed, ex.Message, 0);
+        }
+        finally
+        {
+            foreach (var (_, pending) in pendingApprovals)
+            {
+                pending.TrySetCanceled();
+            }
+
+            pendingApprovals.Clear();
+        }
+
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            await TrySendAsync(channel,
+                               MeshEnvelope.Create(MeshMessageTypes.TaskComplete,
+                                                   new TaskCompletePayload(dispatch.TaskId, result.Status, result.Text, result.Steps)),
+                               CancellationToken.None);
+        }
+
+        await taskCts.CancelAsync();
+        try
+        {
+            await receiveLoop;
+        }
+        catch (OperationCanceledException)
+        {
         }
     }
 
@@ -513,7 +1063,6 @@ public sealed class PeerMeshNode : IMeshNode
 
     private async Task SendBeaconsLoopAsync(CancellationToken cancellationToken)
     {
-        // Send two quick beacons on startup so nearby peers discover us almost immediately.
         await SendBeaconAsync(leaving: false, cancellationToken);
         try
         {
@@ -553,7 +1102,9 @@ public sealed class PeerMeshNode : IMeshNode
                                          _rawNodeName,
                                          _tcpPort,
                                          leaving,
-                                         _crypto.ComputeBeaconMac(BeaconVersion, _instanceId, _rawNodeName, _tcpPort, leaving));
+                                         _crypto.ComputeBeaconMac(BeaconVersion, _instanceId, _rawNodeName, _tcpPort, leaving),
+                                         _capabilities.Services,
+                                         _capabilities.OsDescription);
         var payload = JsonSerializer.SerializeToUtf8Bytes(beacon, MeshEnvelope.JsonOptions);
         var multicastEndpoint = new IPEndPoint(PeerMeshOptions.DefaultMulticastAddress, _options.DiscoveryPort);
 
@@ -563,8 +1114,6 @@ public sealed class PeerMeshNode : IMeshNode
             return;
         }
 
-        // Send over multicast on each active interface AND directed subnet broadcast so Wi-Fi APs
-        // that filter multicast still deliver LAN discovery packets.
         var interfaces = GetActiveIPv4Interfaces();
         foreach (var (address, mask) in interfaces)
         {
@@ -696,16 +1245,20 @@ public sealed class PeerMeshNode : IMeshNode
         }
 
         var normalizedAddress = remoteAddress.IsIPv4MappedToIPv6 ? remoteAddress.MapToIPv4() : remoteAddress;
-        var peer = new DiscoveredPeer(beacon.InstanceId, trimmedName, normalizedAddress, beacon.TcpPort, DateTimeOffset.UtcNow);
+        var caps = beacon.Services is { Count: > 0 }
+            ? new PeerCapabilities(beacon.Services, OsDescription: beacon.OsDescription)
+            : PeerCapabilities.Default;
+        var now = DateTimeOffset.UtcNow;
 
-        var isNew = !_discovered.ContainsKey(beacon.InstanceId);
-        var changed = isNew;
-        if (!isNew && _discovered.TryGetValue(beacon.InstanceId, out var existing))
-        {
-            changed = !string.Equals(existing.RawNodeName, peer.RawNodeName, StringComparison.Ordinal)
+        var isNew = !_discovered.TryGetValue(beacon.InstanceId, out var existing);
+        var firstSeen = isNew ? now : existing!.FirstSeenUtc;
+        var peer = new DiscoveredPeer(beacon.InstanceId, trimmedName, normalizedAddress, beacon.TcpPort, caps, firstSeen, now);
+
+        var changed = isNew
+                      || !string.Equals(existing!.RawNodeName, peer.RawNodeName, StringComparison.Ordinal)
                       || !existing.Address.Equals(peer.Address)
-                      || existing.TcpPort != peer.TcpPort;
-        }
+                      || existing.TcpPort != peer.TcpPort
+                      || !existing.Capabilities.Services.SequenceEqual(peer.Capabilities.Services, StringComparer.OrdinalIgnoreCase);
 
         _discovered[beacon.InstanceId] = peer;
 
@@ -759,19 +1312,20 @@ public sealed class PeerMeshNode : IMeshNode
     private void RebuildPeerSnapshot(bool notifyAlways = false)
     {
         IReadOnlyList<string>? changedPeers = null;
+        IReadOnlyList<PeerInfo>? changedInfos = null;
         string? newStatus = null;
 
         lock (_peersLock)
         {
-            var selfEntry = new PeerSnapshotEntry(_instanceId, _rawNodeName, _localAddress, IsSelf: true, Peer: null);
+            var selfEntry = new PeerSnapshotEntry(_instanceId, _rawNodeName, _localAddress, _capabilities, _onlineSinceUtc, IsSelf: true, Peer: null);
             var entries = new List<PeerSnapshotEntry>(_discovered.Count + 1) { selfEntry };
             foreach (var peer in _discovered.Values)
             {
-                entries.Add(new PeerSnapshotEntry(peer.InstanceId, peer.RawNodeName, peer.Address, IsSelf: false, Peer: peer));
+                entries.Add(new PeerSnapshotEntry(peer.InstanceId, peer.RawNodeName, peer.Address, peer.Capabilities, peer.FirstSeenUtc, IsSelf: false, Peer: peer));
             }
 
             var displayByName = new Dictionary<string, DiscoveredPeer>(StringComparer.OrdinalIgnoreCase);
-            var displayNames = new List<string>(entries.Count);
+            var infos = new List<PeerInfo>(entries.Count);
             var selfDisplay = _rawNodeName;
 
             foreach (var group in entries.GroupBy(e => e.RawNodeName, StringComparer.OrdinalIgnoreCase))
@@ -780,7 +1334,7 @@ public sealed class PeerMeshNode : IMeshNode
                 if (items.Count == 1)
                 {
                     var only = items[0];
-                    displayNames.Add(only.RawNodeName);
+                    infos.Add(new PeerInfo(only.InstanceId, only.RawNodeName, only.Capabilities, only.OnlineSinceUtc));
                     if (only.IsSelf)
                     {
                         selfDisplay = only.RawNodeName;
@@ -793,7 +1347,6 @@ public sealed class PeerMeshNode : IMeshNode
                     continue;
                 }
 
-                // Disambiguate colliding NodeNames by IP address, or short instance ID when on the same IP.
                 var ipCounts = items.GroupBy(i => i.Address.ToString(), StringComparer.Ordinal)
                     .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
                 foreach (var item in items)
@@ -801,7 +1354,7 @@ public sealed class PeerMeshNode : IMeshNode
                     var ipText = item.Address.ToString();
                     var suffix = ipCounts[ipText] == 1 ? ipText : item.InstanceId[..Math.Min(4, item.InstanceId.Length)];
                     var disambiguated = $"{item.RawNodeName} ({suffix})";
-                    displayNames.Add(disambiguated);
+                    infos.Add(new PeerInfo(item.InstanceId, disambiguated, item.Capabilities, item.OnlineSinceUtc));
                     if (item.IsSelf)
                     {
                         selfDisplay = disambiguated;
@@ -813,16 +1366,19 @@ public sealed class PeerMeshNode : IMeshNode
                 }
             }
 
-            displayNames.Sort(StringComparer.OrdinalIgnoreCase);
+            infos.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.DisplayName, b.DisplayName));
+            var displayNames = infos.Select(i => i.DisplayName).ToList();
 
             var listChanged = notifyAlways || !_peers.SequenceEqual(displayNames, StringComparer.Ordinal);
             _effectiveNodeName = selfDisplay;
             _peersByDisplayName = displayByName;
             _peers = displayNames;
+            _peerInfos = infos;
 
             if (listChanged)
             {
                 changedPeers = displayNames;
+                changedInfos = infos;
                 newStatus = $"P2P active as '{selfDisplay}' ({displayNames.Count} online)";
             }
         }
@@ -830,6 +1386,7 @@ public sealed class PeerMeshNode : IMeshNode
         if (changedPeers is not null)
         {
             PeersChanged?.Invoke(changedPeers);
+            PeerInfosChanged?.Invoke(changedInfos!);
             UpdateState(MeshConnectionState.Connected, newStatus!);
         }
     }
@@ -856,7 +1413,6 @@ public sealed class PeerMeshNode : IMeshNode
                     }
 
                     var bytes = unicast.Address.GetAddressBytes();
-                    // Skip APIPA link-local (169.254.x.x) when routing real LAN traffic.
                     if (bytes[0] == 169 && bytes[1] == 254)
                     {
                         continue;
@@ -907,7 +1463,6 @@ public sealed class PeerMeshNode : IMeshNode
         }
         catch (Exception)
         {
-            // Connection closed or cancelled; task teardown handles notification.
         }
     }
 
@@ -972,17 +1527,23 @@ public sealed class PeerMeshNode : IMeshNode
                                           string NodeName,
                                           int TcpPort,
                                           bool Leaving,
-                                          string Mac);
+                                          string Mac,
+                                          IReadOnlyList<string>? Services = null,
+                                          string? OsDescription = null);
 
     private sealed record DiscoveredPeer(string InstanceId,
                                          string RawNodeName,
                                          IPAddress Address,
                                          int TcpPort,
+                                         PeerCapabilities Capabilities,
+                                         DateTimeOffset FirstSeenUtc,
                                          DateTimeOffset LastSeenUtc);
 
     private sealed record PeerSnapshotEntry(string InstanceId,
                                             string RawNodeName,
                                             IPAddress Address,
+                                            PeerCapabilities Capabilities,
+                                            DateTimeOffset OnlineSinceUtc,
                                             bool IsSelf,
                                             DiscoveredPeer? Peer);
 }

@@ -31,6 +31,7 @@
     <Compile Include="..\..\src\WindowsAxon.App\DesktopWindow.cs" Link="Desktop\DesktopWindow.cs" />
     <Compile Include="..\..\src\WindowsAxon.App\WindowInfo.cs" Link="Desktop\WindowInfo.cs" />
     <Compile Include="..\..\src\WindowsAxon.App\ChatHistoryLog.cs" Link="Desktop\ChatHistoryLog.cs" />
+    <Compile Include="..\..\src\WindowsAxon.App\MeshTools.cs" Link="Desktop\MeshTools.cs" />
     <Compile Include="..\..\src\WindowsAxon.App\Updates\*.cs" Link="Desktop\Updates\%(Filename)%(Extension)" />
     <!-- Host rules are compiled in; tests never start the elevated host executable. -->
     <Compile Include="..\..\src\WindowsAxon.ScriptHost\HostRequest.cs" Link="ScriptHost\HostRequest.cs" />
