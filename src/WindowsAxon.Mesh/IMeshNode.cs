@@ -7,6 +7,8 @@ public interface IMeshNode : IMeshTransport
 
     Task<RemoteTaskResult> RunRemoteTaskAsync(string targetNode,
                                               string prompt,
+                                              string conversationId,
+                                              bool forceNewRequest,
                                               Action<string> onToolStarted,
                                               Func<TaskApprovalRequestPayload, CancellationToken, Task<RemoteApprovalAnswer>> onApprovalRequested,
                                               CancellationToken cancellationToken);

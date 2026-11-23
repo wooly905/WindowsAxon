@@ -69,7 +69,12 @@ public sealed record RegisteredPayload(string NodeName,
 public sealed record PeersUpdatedPayload(IReadOnlyList<string> Peers,
                                          IReadOnlyList<PeerInfo>? PeerInfos = null);
 
-public sealed record TaskDispatchPayload(string TaskId, string CallerNode, string TargetNode, string Prompt);
+public sealed record TaskDispatchPayload(string TaskId,
+                                         string CallerNode,
+                                         string TargetNode,
+                                         string Prompt,
+                                         string ConversationId,
+                                         bool ForceNewRequest = false);
 
 public sealed record TaskToolStartedPayload(string TaskId, string ToolName);
 

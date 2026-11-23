@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
@@ -40,6 +41,7 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
     public static string UserSkillsFolder => WindowsToolSet.SkillsFolder(DataFolder);
 
     private static readonly TimeSpan McpConnectTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan RemoteSessionIdleTimeout = TimeSpan.FromMinutes(30);
 
     /// <summary>The names of every tool that a chat registers: the built-in tools and the listed tools of each MCP server.</summary>
     public IReadOnlySet<string> ToolNames =>
@@ -90,7 +92,13 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
     private readonly ChatHistoryLog _chatHistory = new(chatHistoryFolder is null ? ChatHistoryLog.DefaultFolder : Path.GetFullPath(chatHistoryFolder));
     private readonly ArtifactStore _artifactStore = new(Path.Combine(DataFolder, "artifacts"));
     private readonly AsyncLocal<MeshCallContext?> _currentCallContext = new();
+    private readonly ConcurrentDictionary<string, RemoteSessionEntry> _remoteSessions = new(StringComparer.OrdinalIgnoreCase);
     private List<string>? _activeLocalTools;
+    private string _conversationId = Guid.NewGuid().ToString("N");
+
+    internal Func<CancellationToken, Task<IChatClient>>? RemoteModelFactory { get; set; }
+
+    internal int RemoteSessionCount => _remoteSessions.Count;
 
     private static string? GetConfigOverride()
     {
@@ -140,6 +148,60 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
     public string EffectiveMeshNodeName => _meshNode?.NodeName ?? Settings.Chat.Mesh.EffectiveNodeName;
 
     public void PruneExpiredArtifacts() => _artifactStore.PruneExpired();
+
+    public void PruneExpiredRemoteSessions(TimeSpan? idleTimeout = null)
+    {
+        var timeout = idleTimeout ?? RemoteSessionIdleTimeout;
+        var cutoff = DateTimeOffset.UtcNow - timeout;
+        foreach (var (key, entry) in _remoteSessions)
+        {
+            if (entry.LastUsedUtc > cutoff || !entry.Gate.Wait(0))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (!entry.IsDisposed
+                    && entry.LastUsedUtc <= cutoff
+                    && _remoteSessions.TryRemove(new KeyValuePair<string, RemoteSessionEntry>(key, entry)))
+                {
+                    entry.DisposeResources();
+                }
+            }
+            finally
+            {
+                entry.Gate.Release();
+            }
+        }
+    }
+
+    private void ClearRemoteSessions()
+    {
+        foreach (var (key, entry) in _remoteSessions)
+        {
+            if (!_remoteSessions.TryRemove(new KeyValuePair<string, RemoteSessionEntry>(key, entry)))
+            {
+                continue;
+            }
+
+            if (entry.Gate.Wait(0))
+            {
+                try
+                {
+                    entry.DisposeResources();
+                }
+                finally
+                {
+                    entry.Gate.Release();
+                }
+            }
+            else
+            {
+                entry.RetireOnRelease = true;
+            }
+        }
+    }
 
     private bool _forceNewRequest;
 
@@ -408,6 +470,7 @@ appTools,
         _toolSet = null;
         _runner = null;
         _forceNewRequest = false;
+        _conversationId = Guid.NewGuid().ToString("N");
         _model?.Dispose();
         _model = null;
     }
@@ -482,6 +545,7 @@ appTools,
         var secrets = new WindowsSecretStore();
         WriteSettings(updated, secrets, newCredential, apiKey);
         NewChat();
+        ClearRemoteSessions();
         EndpointFactory.ClearApiDetectionCache();
         Settings = updated;
         if (previousReference is not null && previousReference.StartsWith(ManagedCredentialPrefix,
@@ -502,6 +566,7 @@ appTools,
         };
         WriteSettings(updated, new WindowsSecretStore(), null, null);
         NewChat();
+        ClearRemoteSessions();
         Settings = updated;
     }
 
@@ -722,6 +787,8 @@ appTools,
 
     public void StopMesh()
     {
+        ClearRemoteSessions();
+
         var previousJobs = Interlocked.Exchange(ref _meshJobs, null);
         previousJobs?.Dispose();
         _meshArtifacts = null;
@@ -833,10 +900,14 @@ appTools,
             return failed;
         }
 
+        var force = _forceNewRequest;
+        _forceNewRequest = false;
         try
         {
             var result = await node.RunRemoteTaskAsync(targetNode,
                                                        prompt,
+                                                       _conversationId,
+                                                       force,
                                                        tool =>
                                                        {
                                                            tools.Add(tool);
@@ -898,38 +969,117 @@ appTools,
         var adapted = new IncomingRemoteTask(task.JobId,
                                              task.CallerNode,
                                              task.Prompt,
+                                             task.JobId,
+                                             ForceNewRequest: true,
                                              task.ReportProgress,
                                              task.RequestApprovalAsync);
-        return ExecuteIncomingRemoteTaskAsync(adapted, task.CallContext, cancellationToken);
+        return ExecuteOneShotRemoteTaskAsync(adapted, task.CallContext, cancellationToken);
     }
 
-    private Task<RemoteTaskResult> HandleIncomingRemoteTaskAsync(IncomingRemoteTask task,
-                                                                 CancellationToken cancellationToken) =>
-        ExecuteIncomingRemoteTaskAsync(task, null, cancellationToken);
+    internal Task<RemoteTaskResult> HandleIncomingRemoteTaskAsync(IncomingRemoteTask task,
+                                                                  CancellationToken cancellationToken) =>
+        ExecutePersistentRemoteTaskAsync(task, null, cancellationToken);
 
-    private async Task<RemoteTaskResult> ExecuteIncomingRemoteTaskAsync(IncomingRemoteTask task,
-                                                                        MeshCallContext? callContext,
-                                                                        CancellationToken cancellationToken)
+    private async Task<RemoteTaskResult> ExecutePersistentRemoteTaskAsync(IncomingRemoteTask task,
+                                                                          MeshCallContext? callContext,
+                                                                          CancellationToken cancellationToken)
     {
-        var previousContext = _currentCallContext.Value;
-        _currentCallContext.Value = callContext;
-        RemoteRequestReceived?.Invoke(task.CallerNode, task.Prompt);
-        var tools = new List<string>();
+        var key = $"{task.CallerNode}\0{task.ConversationId}";
+        while (true)
+        {
+            var entry = _remoteSessions.GetOrAdd(key, _ => new RemoteSessionEntry());
+            await entry.Gate.WaitAsync(cancellationToken);
+            if (entry.IsDisposed)
+            {
+                entry.Gate.Release();
+                continue;
+            }
+
+            try
+            {
+                if (entry.Runner is null)
+                {
+                    try
+                    {
+                        var (model, toolSet, runner) = await CreateRemoteSessionAsync(entry.Binding,
+                                                                                      $"remote-{task.ConversationId}",
+                                                                                      cancellationToken);
+                        entry.Initialize(model, toolSet, runner);
+                    }
+                    catch
+                    {
+                        _remoteSessions.TryRemove(new KeyValuePair<string, RemoteSessionEntry>(key, entry));
+                        entry.DisposeResources();
+                        throw;
+                    }
+                }
+
+                return await RunBoundRemoteTaskAsync(entry.Runner!,
+                                                     entry.ToolSet!,
+                                                     entry.Binding,
+                                                     task,
+                                                     callContext,
+                                                     cancellationToken);
+            }
+            finally
+            {
+                entry.Touch();
+                if (entry.RetireOnRelease)
+                {
+                    entry.DisposeResources();
+                }
+
+                entry.Gate.Release();
+            }
+        }
+    }
+
+    private async Task<RemoteTaskResult> ExecuteOneShotRemoteTaskAsync(IncomingRemoteTask task,
+                                                                       MeshCallContext? callContext,
+                                                                       CancellationToken cancellationToken)
+    {
+        var binding = new RemoteTaskBinding();
+        var (model, toolSet, runner) = await CreateRemoteSessionAsync(binding, $"remote-{task.TaskId}", cancellationToken);
+        using (model)
+        using (toolSet)
+        {
+            return await RunBoundRemoteTaskAsync(runner, toolSet, binding, task, callContext, cancellationToken);
+        }
+    }
+
+    private async Task<(IChatClient Model, WindowsToolSet ToolSet, AgentRunner Runner)> CreateRemoteSessionAsync(
+        RemoteTaskBinding binding,
+        string sessionId,
+        CancellationToken cancellationToken)
+    {
+        IChatClient? model = null;
+        WindowsToolSet? toolSet = null;
         try
         {
-            var factory = await new EndpointFactory(Settings, new WindowsSecretStore()).ResolveAsync(cancellationToken);
-            using var model = factory.CreateChatClient();
+            ChatSettings chatSettings;
+            if (RemoteModelFactory is not null)
+            {
+                model = await RemoteModelFactory(cancellationToken);
+                chatSettings = Settings.Chat;
+            }
+            else
+            {
+                var factory = await new EndpointFactory(Settings, new WindowsSecretStore()).ResolveAsync(cancellationToken);
+                model = factory.CreateChatClient();
+                chatSettings = factory.Settings.Chat;
+            }
+
             var appTools = new WindowsAppTools();
             var windowTools = new WindowsWindowTools();
             var catalog = new ToolCatalog();
-            using var toolSet = CreateTools(catalog,
-                                            appTools,
-                                            windowTools,
-                                            model,
-                                            $"remote-{task.TaskId}",
-                                            () => { },
-                                            _ => { },
-                                            Settings.Chat.AllowedPrivateHosts);
+            toolSet = CreateTools(catalog,
+                                  appTools,
+                                  windowTools,
+                                  model,
+                                  sessionId,
+                                  () => { },
+                                  _ => { },
+                                  Settings.Chat.AllowedPrivateHosts);
             if (Settings.Chat.Mesh.IsEnabled)
             {
                 ToolRegistration.Add(catalog,
@@ -941,23 +1091,30 @@ appTools,
                                                    () => _currentCallContext.Value,
                                                    tool =>
                                                    {
-                                                       task.ReportToolStarted(tool);
-                                                       RemoteToolStarted?.Invoke(task.CallerNode, tool);
+                                                       if (binding.CurrentTask is { } activeTask)
+                                                       {
+                                                           activeTask.ReportToolStarted(tool);
+                                                           RemoteToolStarted?.Invoke(activeTask.CallerNode, tool);
+                                                       }
                                                    }));
             }
+
             var audit = new ToolStartAuditLog(new JsonlAuditLog(Path.Combine(DataFolder, "logs")),
                                               tool =>
                                               {
-                                                  tools.Add(tool);
-                                                  task.ReportToolStarted(tool);
-                                                  RemoteToolStarted?.Invoke(task.CallerNode, tool);
+                                                  binding.CurrentTools?.Add(tool);
+                                                  if (binding.CurrentTask is { } activeTask)
+                                                  {
+                                                      activeTask.ReportToolStarted(tool);
+                                                      RemoteToolStarted?.Invoke(activeTask.CallerNode, tool);
+                                                  }
                                               });
             var toolNames = catalog.Entries.Select(e => e.Name).ToHashSet();
             var skills = await Task.Run(() => SkillCatalog.LoadAsync([(BuiltInSkillsFolder, true), (UserSkillsFolder, false)],
                                                                      toolNames,
                                                                      cancellationToken),
                                         cancellationToken);
-            var dependencies = new AgentDependencies(factory.Settings.Chat,
+            var dependencies = new AgentDependencies(chatSettings,
                                                      model,
                                                      catalog,
                                                      skills,
@@ -972,19 +1129,38 @@ appTools,
                                                      new RemoteStepLimitPrompter(),
                                                      []);
             var session = await new AgentFactory(dependencies).CreateSessionAsync(cancellationToken);
-            var runner = new AgentRunner(session, new RemoteApprovalPrompter(task), audit);
-            using var stop = cancellationToken.Register(() => toolSet.StopBrowser());
-            try
-            {
-                var result = await runner.RunAsync(task.Prompt, forceNewRequest: true, cancellationToken: cancellationToken);
-                TryAppendHistory(ChatDirection.Incoming, task.CallerNode, task.Prompt, result.Text, result.Status, result.Steps, tools);
-                RemoteResponseSent?.Invoke(task.CallerNode, result.Status, result.Text);
-                return new RemoteTaskResult(MapRemoteStatus(result.Status), result.Text, result.Steps);
-            }
-            finally
-            {
-                toolSet.CloseResearchBrowser();
-            }
+            var runner = new AgentRunner(session, new RemoteApprovalPrompter(binding), audit);
+            return (model, toolSet, runner);
+        }
+        catch
+        {
+            toolSet?.Dispose();
+            model?.Dispose();
+            throw;
+        }
+    }
+
+    private async Task<RemoteTaskResult> RunBoundRemoteTaskAsync(AgentRunner runner,
+                                                                 WindowsToolSet toolSet,
+                                                                 RemoteTaskBinding binding,
+                                                                 IncomingRemoteTask task,
+                                                                 MeshCallContext? callContext,
+                                                                 CancellationToken cancellationToken)
+    {
+        var previousContext = _currentCallContext.Value;
+        _currentCallContext.Value = callContext;
+        RemoteRequestReceived?.Invoke(task.CallerNode, task.Prompt);
+        var tools = new List<string>();
+        binding.SetCurrent(task, tools);
+        using var stop = cancellationToken.Register(() => toolSet.StopBrowser());
+        try
+        {
+            var result = await runner.RunAsync(task.Prompt,
+                                               forceNewRequest: task.ForceNewRequest,
+                                               cancellationToken: cancellationToken);
+            TryAppendHistory(ChatDirection.Incoming, task.CallerNode, task.Prompt, result.Text, result.Status, result.Steps, tools);
+            RemoteResponseSent?.Invoke(task.CallerNode, result.Status, result.Text);
+            return new RemoteTaskResult(MapRemoteStatus(result.Status), result.Text, result.Steps);
         }
         catch (OperationCanceledException)
         {
@@ -1000,6 +1176,8 @@ appTools,
         }
         finally
         {
+            toolSet.CloseResearchBrowser();
+            binding.ClearCurrent();
             _currentCallContext.Value = previousContext;
         }
     }
@@ -1052,12 +1230,74 @@ appTools,
         NewChat();
     }
 
-    private sealed class RemoteApprovalPrompter(IncomingRemoteTask task) : IApprovalPrompter
+    private sealed class RemoteTaskBinding
+    {
+        public IncomingRemoteTask? CurrentTask { get; private set; }
+
+        public List<string>? CurrentTools { get; private set; }
+
+        public void SetCurrent(IncomingRemoteTask task, List<string> tools)
+        {
+            CurrentTask = task;
+            CurrentTools = tools;
+        }
+
+        public void ClearCurrent()
+        {
+            CurrentTask = null;
+            CurrentTools = null;
+        }
+    }
+
+    private sealed class RemoteSessionEntry
+    {
+        private long _lastUsedUtcTicks = DateTimeOffset.UtcNow.UtcTicks;
+
+        public SemaphoreSlim Gate { get; } = new(1, 1);
+
+        public RemoteTaskBinding Binding { get; } = new();
+
+        public IChatClient? Model { get; private set; }
+
+        public WindowsToolSet? ToolSet { get; private set; }
+
+        public AgentRunner? Runner { get; private set; }
+
+        public bool IsDisposed { get; private set; }
+
+        public volatile bool RetireOnRelease;
+
+        public DateTimeOffset LastUsedUtc => new(Interlocked.Read(ref _lastUsedUtcTicks), TimeSpan.Zero);
+
+        public void Initialize(IChatClient model, WindowsToolSet toolSet, AgentRunner runner)
+        {
+            Model = model;
+            ToolSet = toolSet;
+            Runner = runner;
+            Touch();
+        }
+
+        public void Touch() => Interlocked.Exchange(ref _lastUsedUtcTicks, DateTimeOffset.UtcNow.UtcTicks);
+
+        public void DisposeResources()
+        {
+            IsDisposed = true;
+            ToolSet?.Dispose();
+            ToolSet = null;
+            Model?.Dispose();
+            Model = null;
+            Runner = null;
+        }
+    }
+
+    private sealed class RemoteApprovalPrompter(RemoteTaskBinding binding) : IApprovalPrompter
     {
         public async Task<ApprovalAnswer> AskAsync(FunctionCallContent call,
                                                    ApprovalDecision decision,
                                                    CancellationToken cancellationToken)
         {
+            var task = binding.CurrentTask
+                ?? throw new InvalidOperationException("No active remote task for approval.");
             var argsJson = JsonSerializer.Serialize(call.Arguments);
             var req = new TaskApprovalRequestPayload(task.TaskId,
                                                      Guid.NewGuid().ToString("N"),

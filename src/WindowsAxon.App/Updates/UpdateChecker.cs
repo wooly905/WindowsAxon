@@ -7,6 +7,7 @@ public sealed class UpdateChecker(HttpClient http)
 {
     public static readonly Uri LatestReleaseUri = new("https://api.github.com/repos/wooly905/WindowsAxon/releases/latest");
 
+    private const string ExePrefix = "WindowsAxon-";
     private const string ExeSuffix = "-win-x64.exe";
 
     /// <summary>Returns the latest release, or null when it cannot be read or has no usable assets.</summary>
@@ -60,7 +61,8 @@ public sealed class UpdateChecker(HttpClient http)
 
             foreach (var (name, exeUrl) in urls)
             {
-                if (name.EndsWith(ExeSuffix, StringComparison.OrdinalIgnoreCase)
+                if (name.StartsWith(ExePrefix, StringComparison.OrdinalIgnoreCase)
+                    && name.EndsWith(ExeSuffix, StringComparison.OrdinalIgnoreCase)
                     && urls.TryGetValue($"{name}.sha256", out var shaUrl))
                 {
                     return new ReleaseInfo(version, pageUrl, name, exeUrl, shaUrl);

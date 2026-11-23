@@ -9,6 +9,8 @@ public sealed record RemoteTaskResult(RemoteRunStatus Status, string Text, int S
 public sealed record IncomingRemoteTask(string TaskId,
                                         string CallerNode,
                                         string Prompt,
+                                        string ConversationId,
+                                        bool ForceNewRequest,
                                         Action<string> ReportToolStarted,
                                         Func<TaskApprovalRequestPayload, CancellationToken, Task<RemoteApprovalAnswer>> RequestApprovalAsync);
 
@@ -123,10 +125,14 @@ public sealed class MeshClient : IMeshNode
 
     public async Task<RemoteTaskResult> RunRemoteTaskAsync(string targetNode,
                                                            string prompt,
+                                                           string conversationId,
+                                                           bool forceNewRequest,
                                                            Action<string> onToolStarted,
                                                            Func<TaskApprovalRequestPayload, CancellationToken, Task<RemoteApprovalAnswer>> onApprovalRequested,
                                                            CancellationToken cancellationToken)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+
         var channel = _channel;
         if (_state != MeshConnectionState.Connected || channel is null || channel.State != WebSocketState.Open)
         {
@@ -146,7 +152,7 @@ public sealed class MeshClient : IMeshNode
         try
         {
             await channel.SendAsync(MeshEnvelope.Create(MeshMessageTypes.TaskDispatch,
-                                                        new TaskDispatchPayload(taskId, _nodeName, targetNode, prompt)),
+                                                        new TaskDispatchPayload(taskId, _nodeName, targetNode, prompt, conversationId, forceNewRequest)),
                                     cancellationToken);
             return await state.Completion.Task;
         }
@@ -697,6 +703,8 @@ public sealed class MeshClient : IMeshNode
             var incomingTask = new IncomingRemoteTask(dispatch.TaskId,
                                                       dispatch.CallerNode,
                                                       dispatch.Prompt,
+                                                      dispatch.ConversationId,
+                                                      dispatch.ForceNewRequest,
                                                       tool => _ = TrySendAsync(channel,
                                                                                MeshEnvelope.Create(MeshMessageTypes.TaskToolStarted,
                                                                                                    new TaskToolStartedPayload(dispatch.TaskId, tool)),

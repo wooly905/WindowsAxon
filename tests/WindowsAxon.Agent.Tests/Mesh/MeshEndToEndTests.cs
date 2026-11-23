@@ -54,6 +54,8 @@ public sealed class MeshEndToEndTests
         var ct = TestContext.Current.CancellationToken;
         var result = await clientA.RunRemoteTaskAsync("Computer B",
                                                       "show me your harddrive free space",
+                                                      "conv-1",
+                                                      false,
                                                       tool => toolsObserved.Add(tool),
                                                       (req, _) =>
                                                       {
@@ -107,6 +109,8 @@ public sealed class MeshEndToEndTests
         using var cts = new CancellationTokenSource();
         var runTask = clientA.RunRemoteTaskAsync("Computer B",
                                                  "long task",
+                                                 "conv-cancel",
+                                                 false,
                                                  _ => { },
                                                  (_, _) => Task.FromResult(RemoteApprovalAnswer.Deny),
                                                  cts.Token);
@@ -170,6 +174,8 @@ public sealed class MeshEndToEndTests
         var testCt = TestContext.Current.CancellationToken;
         var runTask = clientA.RunRemoteTaskAsync("Computer B",
                                                  "work",
+                                                 "conv-disconnect",
+                                                 false,
                                                  _ => { },
                                                  (_, _) => Task.FromResult(RemoteApprovalAnswer.Deny),
                                                  testCt);
@@ -180,6 +186,51 @@ public sealed class MeshEndToEndTests
         var result = await runTask.WaitAsync(TimeSpan.FromSeconds(5), testCt);
         Assert.Equal(RemoteRunStatus.Failed, result.Status);
         Assert.Contains("disconnected", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ForwardsConversationIdAndForceNewRequestAcrossHub()
+    {
+        await using var hub = await TestHubServer.StartAsync(token: null);
+        var received = new List<(string ConversationId, bool ForceNewRequest, string Prompt)>();
+
+        await using var clientA = new MeshClient(hub.WebSocketUri,
+                                                 "Computer A",
+                                                 null,
+                                                 (_, _) => Task.FromResult(new RemoteTaskResult(RemoteRunStatus.Answered, "", 0)));
+
+        await using var clientB = new MeshClient(hub.WebSocketUri,
+                                                 "Computer B",
+                                                 null,
+                                                 (task, _) =>
+                                                 {
+                                                     received.Add((task.ConversationId, task.ForceNewRequest, task.Prompt));
+                                                     return Task.FromResult(new RemoteTaskResult(RemoteRunStatus.Answered, "ok", 1));
+                                                 });
+
+        clientA.Start();
+        clientB.Start();
+        await WaitUntilAsync(() => clientA.OnlinePeers.Contains("Computer B"));
+
+        var ct = TestContext.Current.CancellationToken;
+        await clientA.RunRemoteTaskAsync("Computer B",
+                                         "remove duck.pdf",
+                                         "conv-shared",
+                                         false,
+                                         _ => { },
+                                         (_, _) => Task.FromResult(RemoteApprovalAnswer.Deny),
+                                         ct);
+        await clientA.RunRemoteTaskAsync("Computer B",
+                                         "it is d:\\temp folder",
+                                         "conv-shared",
+                                         true,
+                                         _ => { },
+                                         (_, _) => Task.FromResult(RemoteApprovalAnswer.Deny),
+                                         ct);
+
+        Assert.Equal(2, received.Count);
+        Assert.Equal(("conv-shared", false, "remove duck.pdf"), received[0]);
+        Assert.Equal(("conv-shared", true, "it is d:\\temp folder"), received[1]);
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 5000)

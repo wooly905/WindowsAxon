@@ -81,6 +81,7 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         {
             ViewModel.PruneExpired();
             _service.PruneExpiredArtifacts();
+            _service.PruneExpiredRemoteSessions();
         };
         _pruneTimer.Start();
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1000, 900));

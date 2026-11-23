@@ -68,14 +68,30 @@ jobs:
           -p:BuildNumber=${{ env.BUILD_NUMBER }}
           -o publish
 
+      - name: Publish single-file hub
+        run: >-
+          dotnet publish src/WindowsAxon.Hub/WindowsAxon.Hub.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=none
+          -p:BuildNumber=${{ env.BUILD_NUMBER }}
+          -o publish-hub
+
       - name: Package release assets
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          $exe = "dist/WindowsAxon-$env:VERSION-win-x64.exe"
-          Copy-Item publish/WindowsAxon.App.exe $exe
-          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $(Split-Path $exe -Leaf)" | Set-Content "$exe.sha256" -Encoding ascii
+          $assets = @(
+            @{ Source = "publish/WindowsAxon.App.exe"; Target = "dist/WindowsAxon-$env:VERSION-win-x64.exe" }
+            @{ Source = "publish-hub/WindowsAxon.Hub.exe"; Target = "dist/WindowsAxon.Hub-$env:VERSION-win-x64.exe" }
+          )
+          foreach ($asset in $assets) {
+            Copy-Item $asset.Source $asset.Target
+            $hash = (Get-FileHash $asset.Target -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $(Split-Path $asset.Target -Leaf)" | Set-Content "$($asset.Target).sha256" -Encoding ascii
+          }
 
       - uses: actions/upload-artifact@v7
         with:

@@ -61,6 +61,8 @@ public sealed class PeerMeshEndToEndTests
         var ct = TestContext.Current.CancellationToken;
         var result = await nodeA.RunRemoteTaskAsync("Computer B",
                                                     "show me your harddrive free space",
+                                                    "conv-p2p-1",
+                                                    false,
                                                     tool => toolsObserved.Add(tool),
                                                     (req, _) =>
                                                     {
@@ -151,6 +153,8 @@ public sealed class PeerMeshEndToEndTests
         using var cts = new CancellationTokenSource();
         var runTask = nodeA.RunRemoteTaskAsync("Computer B",
                                                "long task",
+                                               "conv-p2p-cancel",
+                                               false,
                                                _ => { },
                                                (_, _) => Task.FromResult(RemoteApprovalAnswer.Deny),
                                                cts.Token);
@@ -193,6 +197,8 @@ public sealed class PeerMeshEndToEndTests
         var testCt = TestContext.Current.CancellationToken;
         var runTask = nodeA.RunRemoteTaskAsync("Computer B",
                                                "work",
+                                               "conv-p2p-disconnect",
+                                               false,
                                                _ => { },
                                                (_, _) => Task.FromResult(RemoteApprovalAnswer.Deny),
                                                testCt);
@@ -235,6 +241,8 @@ public sealed class PeerMeshEndToEndTests
         var otherPeer = node1.OnlinePeers.Single(p => !string.Equals(p, node1.NodeName, StringComparison.OrdinalIgnoreCase));
         var result = await node1.RunRemoteTaskAsync(otherPeer,
                                                     "ping",
+                                                    "conv-p2p-dup",
+                                                    false,
                                                     _ => { },
                                                     (_, _) => Task.FromResult(RemoteApprovalAnswer.Deny),
                                                     TestContext.Current.CancellationToken);

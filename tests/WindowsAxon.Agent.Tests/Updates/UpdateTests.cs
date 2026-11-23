@@ -45,6 +45,26 @@ public sealed class UpdateTests : IDisposable
         Assert.Equal("https://example.com/WindowsAxon-0.1.7-win-x64.exe.sha256", release.Sha256Url.AbsoluteUri);
     }
 
+    [Fact]
+    public void Parse_ignores_hub_exe_and_selects_app_exe()
+    {
+        var json = """
+            {"tag_name":"v0.1.7","html_url":"https://github.com/wooly905/WindowsAxon/releases/tag/v0.1.7",
+             "assets":[
+               {"name":"WindowsAxon.Hub-0.1.7-win-x64.exe","browser_download_url":"https://example.com/WindowsAxon.Hub-0.1.7-win-x64.exe"},
+               {"name":"WindowsAxon.Hub-0.1.7-win-x64.exe.sha256","browser_download_url":"https://example.com/WindowsAxon.Hub-0.1.7-win-x64.exe.sha256"},
+               {"name":"WindowsAxon-0.1.7-win-x64.exe","browser_download_url":"https://example.com/WindowsAxon-0.1.7-win-x64.exe"},
+               {"name":"WindowsAxon-0.1.7-win-x64.exe.sha256","browser_download_url":"https://example.com/WindowsAxon-0.1.7-win-x64.exe.sha256"}
+             ]}
+            """;
+
+        var release = UpdateChecker.Parse(json);
+
+        Assert.NotNull(release);
+        Assert.Equal("WindowsAxon-0.1.7-win-x64.exe", release.ExeName);
+        Assert.Equal("https://example.com/WindowsAxon-0.1.7-win-x64.exe.sha256", release.Sha256Url.AbsoluteUri);
+    }
+
     [Theory]
     [InlineData("not-a-version", "WindowsAxon-0.1.7-win-x64.exe", true)]
     [InlineData("v0.1.7", null, true)]
