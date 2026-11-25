@@ -1,5 +1,6 @@
 using NSubstitute;
 using WindowsAxon.Agent.Approval;
+using WindowsAxon.Agent.Settings;
 using WindowsAxon.Agent.Tools;
 
 namespace WindowsAxon.Agent.Tests.Approval;
@@ -128,6 +129,60 @@ public class ApprovalPolicyTests
 
         policy.AllowForConversation(Call("fs_read_text"));
         Assert.Equal(ApprovalOutcome.AutoApprove, policy.Decide(Call("fs_read_text")).Outcome);
+    }
+
+    private static ApprovalPolicy LocalPolicy()
+    {
+        var catalog = new ToolCatalog();
+        catalog.Add(AIFunctionFactory.Create(() => "", "wallpaper_set"), "personalize", RiskLevel.Change);
+        catalog.Add(AIFunctionFactory.Create(() => "", "fs_delete"), "files", RiskLevel.Danger);
+        catalog.Add(AIFunctionFactory.Create(() => "", "fs_read_text"), "files", RiskLevel.Read, policyDriven: true);
+        catalog.Add(AIFunctionFactory.Create(() => "", "send"), "mesh", RiskLevel.Change, outbound: true);
+        return new ApprovalPolicy(catalog, [new SensitiveReadRule(true, "api.example.com")], ApprovalLevel.Local);
+    }
+
+    [Theory]
+    [InlineData("wallpaper_set")]
+    [InlineData("fs_read_text")]
+    public void Local_level_approves_local_reads_and_changes(string tool)
+    {
+        Assert.Equal(ApprovalOutcome.AutoApprove, LocalPolicy().Decide(Call(tool)).Outcome);
+    }
+
+    [Theory]
+    [InlineData("fs_delete")]
+    [InlineData("send")]
+    [InlineData("mystery")]
+    public void Local_level_asks_for_danger_outbound_and_unknown_tools(string tool)
+    {
+        Assert.Equal(ApprovalOutcome.Ask, LocalPolicy().Decide(Call(tool)).Outcome);
+    }
+
+    [Fact]
+    public void Local_level_respects_a_rule_that_always_asks()
+    {
+        var catalog = new ToolCatalog();
+        catalog.Add(AIFunctionFactory.Create(() => "", "app_launch"), "apps", RiskLevel.Change, policyDriven: true);
+        var rule = Substitute.For<IApprovalRule>();
+        rule.AppliesTo("app_launch").Returns(true);
+        rule.AlwaysAsks(Arg.Any<FunctionCallContent>()).Returns(true);
+        rule.Decide(Arg.Any<FunctionCallContent>()).Returns(new ApprovalDecision(ApprovalOutcome.Ask, false, null));
+
+        var policy = new ApprovalPolicy(catalog, [rule], ApprovalLevel.Local);
+
+        Assert.Equal(ApprovalOutcome.Ask, policy.Decide(Call("app_launch")).Outcome);
+    }
+
+    [Theory]
+    [InlineData(false, false, ApprovalLevel.Ask)]
+    [InlineData(true, false, ApprovalLevel.Read)]
+    [InlineData(true, true, ApprovalLevel.All)]
+    public void Legacy_settings_map_to_an_approval_level(bool autoApprove, bool approveAll, ApprovalLevel expected)
+    {
+        var chat = new ChatSettings { AutoApproveTools = autoApprove, ApproveAllTools = approveAll };
+
+        Assert.Equal(expected, chat.ResolveApprovalLevel());
+        Assert.Equal(ApprovalLevel.Local, (chat with { ApprovalLevel = ApprovalLevel.Local }).ResolveApprovalLevel());
     }
 
     [Fact]

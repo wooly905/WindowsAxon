@@ -467,6 +467,31 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         thinking.Toggled += (_, _) => effort.IsEnabled = thinking.IsOn;
+        var currentLevel = _service.Settings.Chat.ResolveApprovalLevel();
+        var approval = new ComboBox
+        {
+            Header = "Tool approval",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        foreach (var (level, label) in new[]
+                 {
+                     (ApprovalLevel.Ask, "Ask for every action"),
+                     (ApprovalLevel.Read, "Allow reads"),
+                     (ApprovalLevel.Local, "Allow actions on this computer"),
+                     (ApprovalLevel.All, "Allow all actions"),
+                 })
+        {
+            approval.Items.Add(new ComboBoxItem { Content = label, Tag = level });
+        }
+        var approvalNote = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        approval.SelectionChanged += (_, _) => approvalNote.Text = (ApprovalLevel)((ComboBoxItem)approval.SelectedItem).Tag switch
+        {
+            ApprovalLevel.Ask => "Every tool call shows the approval card.",
+            ApprovalLevel.Read => "Ordinary reads run without asking. Changes, dangerous actions, and network requests ask.",
+            ApprovalLevel.Local => "Reads and changes on this computer run without asking. File contents go to the model endpoint. Dangerous actions and network requests ask.",
+            _ => "Every tool call runs without asking, including deletes, scripts, registry changes, and network requests.",
+        };
+        approval.SelectedIndex = (int)currentLevel;
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
         var content = new StackPanel { Spacing = 12 };
         content.Children.Add(provider);
@@ -475,6 +500,8 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         content.Children.Add(model);
         content.Children.Add(thinking);
         content.Children.Add(effort);
+        content.Children.Add(approval);
+        content.Children.Add(approvalNote);
         content.Children.Add(apiKey);
         content.Children.Add(keyStatus);
         content.Children.Add(removeKey);
@@ -504,7 +531,8 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         var dialog = new ContentDialog
         {
             Title = "Model settings",
-            Content = new ScrollViewer { Content = content, MaxHeight = 480 },
+            // A fixed width keeps the dialog from resizing when the approval note changes.
+            Content = new ScrollViewer { Content = content, MaxHeight = 480, Width = 460 },
             PrimaryButtonText = "Save",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
@@ -522,6 +550,11 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
                                       (string)provider.SelectedItem);
                 var selectedEffort = (string?)effort.SelectedItem;
                 _service.SaveReasoning(thinking.IsOn, selectedEffort is null or DefaultEffort ? null : selectedEffort);
+                var selectedLevel = (ApprovalLevel)((ComboBoxItem)approval.SelectedItem).Tag;
+                if (selectedLevel != currentLevel)
+                {
+                    _service.SaveApprovalLevel(selectedLevel);
+                }
                 ViewModel.SettingsChanged();
             }
             catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)

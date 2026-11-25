@@ -1,3 +1,4 @@
+using WindowsAxon.Agent.Settings;
 using WindowsAxon.Agent.Tools;
 using Microsoft.Extensions.AI;
 
@@ -6,8 +7,7 @@ namespace WindowsAxon.Agent.Approval;
 /// <summary>The approval gate in code. A prompt, a skill, or an observation cannot change it.</summary>
 public sealed class ApprovalPolicy(ToolCatalog catalog,
                                   IEnumerable<IApprovalRule> rules,
-                                  bool autoApprove = false,
-                                  bool approveAll = false)
+                                  ApprovalLevel level)
 {
     private static readonly ApprovalDecision AskEachTime = new(ApprovalOutcome.Ask, false, null);
     private static readonly ApprovalDecision Auto = new(ApprovalOutcome.AutoApprove, false, null);
@@ -15,9 +15,17 @@ public sealed class ApprovalPolicy(ToolCatalog catalog,
     private readonly IReadOnlyList<IApprovalRule> _rules = rules.ToList();
     private readonly HashSet<string> _allowed = [];
 
+    public ApprovalPolicy(ToolCatalog catalog,
+                          IEnumerable<IApprovalRule> rules,
+                          bool autoApprove = false,
+                          bool approveAll = false)
+        : this(catalog, rules, approveAll ? ApprovalLevel.All : autoApprove ? ApprovalLevel.Read : ApprovalLevel.Ask)
+    {
+    }
+
     public ApprovalDecision Decide(FunctionCallContent call)
     {
-        if (approveAll)
+        if (level == ApprovalLevel.All)
         {
             return Auto;
         }
@@ -31,8 +39,14 @@ public sealed class ApprovalPolicy(ToolCatalog catalog,
         var rule = _rules.FirstOrDefault(r => r.AppliesTo(call.Name));
         var alwaysAsks = rule?.AlwaysAsks(call) == true;
 
-        if (autoApprove && !entry.Outbound && entry.Risk < RiskLevel.Change
+        if (level == ApprovalLevel.Read && !entry.Outbound && entry.Risk < RiskLevel.Change
             && !entry.PolicyDriven && !alwaysAsks)
+        {
+            return Auto;
+        }
+
+        // Local includes policy-driven reads: the user accepted that tool results go to the chosen endpoint.
+        if (level == ApprovalLevel.Local && !entry.Outbound && entry.Risk <= RiskLevel.Change && !alwaysAsks)
         {
             return Auto;
         }

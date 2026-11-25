@@ -1,6 +1,8 @@
 using System.Text.Json;
 using NSubstitute;
+using WindowsAxon.Agent.Approval;
 using WindowsAxon.Agent.Selection;
+using WindowsAxon.Agent.Settings;
 using WindowsAxon.Agent.Tests.Fakes;
 using WindowsAxon.App;
 using WindowsAxon.Mesh;
@@ -24,6 +26,39 @@ public sealed class RemoteConversationSessionTests
                                       stepLimits,
                                       settingsPath: Path.Combine(tempDir, "settings.json"),
                                       chatHistoryFolder: Path.Combine(tempDir, "history"));
+    }
+
+    [Theory]
+    [InlineData(ApprovalLevel.All, RemoteApprovalAnswer.Allow, 0)]
+    [InlineData(ApprovalLevel.Local, RemoteApprovalAnswer.Deny, 1)]
+    public async Task ForwardedRemoteApprovalFollowsTheLocalApprovalLevel(ApprovalLevel level,
+                                                                          RemoteApprovalAnswer expected,
+                                                                          int prompts)
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"WindowsAxon-RemoteApproval-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var approvals = Substitute.For<IApprovalPrompter>();
+            approvals.AskAsync(Arg.Any<FunctionCallContent>(), Arg.Any<ApprovalDecision>(), Arg.Any<CancellationToken>())
+                .Returns(ApprovalAnswer.Deny);
+            var service = new DesktopChatService(approvals,
+                                                 Substitute.For<IStepLimitPrompter>(),
+                                                 settingsPath: Path.Combine(tempDir, "settings.json"),
+                                                 chatHistoryFolder: Path.Combine(tempDir, "history"));
+            service.SaveApprovalLevel(level);
+            var req = new TaskApprovalRequestPayload("t1", "a1", "script_run", "{}", null, false);
+
+            var answer = await service.AskRemoteApprovalAsync("pc-2", req, Ct);
+
+            Assert.Equal(expected, answer);
+            await approvals.Received(prompts)
+                .AskAsync(Arg.Any<FunctionCallContent>(), Arg.Any<ApprovalDecision>(), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
     }
 
     [Fact]

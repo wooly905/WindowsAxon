@@ -26,6 +26,7 @@
     <ProjectReference Include="..\WindowsAxon.Windows\WindowsAxon.Windows.csproj" />
     <!-- Build order only; the elevated host must never load in the app process. -->
     <ProjectReference Include="..\WindowsAxon.ScriptHost\WindowsAxon.ScriptHost.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <InternalsVisibleTo Include="WindowsAxon.Agent.Tests" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Assets\WindowsAxon.ico" CopyToOutputDirectory="PreserveNewest" />

@@ -590,6 +590,19 @@ appTools,
         Settings = updated;
     }
 
+    /// <summary>Saves the tool approval level. The change applies to new chats.</summary>
+    public void SaveApprovalLevel(ApprovalLevel level)
+    {
+        var updated = Settings with
+        {
+            Chat = Settings.Chat with { ApprovalLevel = level }
+        };
+        WriteSettings(updated, new WindowsSecretStore(), null, null);
+        NewChat();
+        ClearRemoteSessions();
+        Settings = updated;
+    }
+
     /// <summary>Saves a new or changed MCP server. The change applies to new chats.</summary>
     /// <param name="originalName">The name of the server to replace, or null to add a server.</param>
     /// <param name="headerName">The one secret header for an HTTP server, or blank for no header.</param>
@@ -960,10 +973,17 @@ appTools,
         }
     }
 
-    private async Task<RemoteApprovalAnswer> AskRemoteApprovalAsync(string targetNode,
-                                                                    TaskApprovalRequestPayload req,
-                                                                    CancellationToken cancellationToken)
+    /// <summary>Answers an approval request that a remote computer forwarded to this user.</summary>
+    internal async Task<RemoteApprovalAnswer> AskRemoteApprovalAsync(string targetNode,
+                                                                     TaskApprovalRequestPayload req,
+                                                                     CancellationToken cancellationToken)
     {
+        // The remote computer asks this user, so this user's "Allow all actions" answers for them.
+        if (Settings.Chat.ResolveApprovalLevel() == ApprovalLevel.All)
+        {
+            return RemoteApprovalAnswer.Allow;
+        }
+
         Dictionary<string, object?>? args = null;
         if (!string.IsNullOrWhiteSpace(req.ArgumentsJson))
         {

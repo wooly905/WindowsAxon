@@ -34,6 +34,14 @@ public sealed record ChatSettings
     /// <summary>Approve every tool call without asking, including changes, dangerous actions, and network requests.</summary>
     public bool ApproveAllTools { get; init; }
 
+    /// <summary>The approval level. Null uses AutoApproveTools and ApproveAllTools from older settings files.</summary>
+    public ApprovalLevel? ApprovalLevel { get; init; }
+
+    public ApprovalLevel ResolveApprovalLevel() =>
+        ApprovalLevel ?? (ApproveAllTools ? Settings.ApprovalLevel.All
+            : AutoApproveTools ? Settings.ApprovalLevel.Read
+            : Settings.ApprovalLevel.Ask);
+
     /// <summary>Internal hosts that web lookup may read: host names, IP addresses, or CIDR ranges in private address space.</summary>
     public List<string> AllowedPrivateHosts { get; init; } = [];
 
