@@ -58,7 +58,7 @@
                         <TextBlock Text="Online computers" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
                         <TextBlock x:Name="MeshStatusBadge" HorizontalAlignment="Right" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" VerticalAlignment="Center" />
                     </Grid>
-                    <ListView x:Name="OnlinePeersList" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True" ItemClick="OnlinePeersList_ItemClick" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" AutomationProperties.Name="Online computers" />
+                    <ListView x:Name="OnlinePeersList" Grid.Row="1" SelectionMode="Single" IsItemClickEnabled="True" ItemClick="OnlinePeersList_ItemClick" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" AutomationProperties.Name="Online computers" />
                 </Grid>
             </Border>
             <StackPanel Grid.Row="2">
@@ -96,7 +96,7 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <StackPanel Spacing="8">
-                <TextBlock Text="Enter what you want to do in Windows." Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+                <TextBlock Text="{x:Bind ViewModel.Header, Mode=OneWay}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
                 <InfoBar x:Name="UpdateBar" IsOpen="False" IsClosable="False" Severity="Informational" Title="Update available">
                     <InfoBar.Content>
                         <StackPanel x:Name="UpdateActions" Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
@@ -108,7 +108,7 @@
                 <TextBlock x:Name="InputBanner" Visibility="Collapsed" Text="WindowsAxon is using the mouse and keyboard — press Ctrl+Alt+Q to stop." TextWrapping="Wrap" />
             </StackPanel>
             <ScrollViewer x:Name="ConversationScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <ItemsControl ItemsSource="{x:Bind ViewModel.Messages}" ItemTemplateSelector="{StaticResource ChatTemplates}" FontSize="{ThemeResource ControlContentThemeFontSize}" SizeChanged="ConversationContent_SizeChanged" />
+                <ItemsControl ItemsSource="{x:Bind ViewModel.Messages, Mode=OneWay}" ItemTemplateSelector="{StaticResource ChatTemplates}" FontSize="{ThemeResource ControlContentThemeFontSize}" SizeChanged="ConversationContent_SizeChanged" />
             </ScrollViewer>
             <Border x:Name="PromptPanel" Grid.Row="2" Visibility="Collapsed" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="16">
                 <StackPanel Spacing="12">

@@ -268,6 +268,26 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
                 : null;
     }
 
+    /// <summary>Runs <paramref name="text"/> on <paramref name="targetPeer"/>, or locally when it is null or this computer.</summary>
+    /// <param name="conversationId">The remote computer keeps one agent session for all requests with this ID.</param>
+    public async Task<DesktopRunResult> RunAsync(string text,
+                                                 string? targetPeer,
+                                                 string conversationId,
+                                                 CancellationToken cancellationToken)
+    {
+        if (targetPeer is null || string.Equals(targetPeer, EffectiveMeshNodeName, StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunAsync(text, cancellationToken);
+        }
+
+        if (!Settings.Chat.Mesh.IsEnabled || !OnlinePeers.Contains(targetPeer, StringComparer.OrdinalIgnoreCase))
+        {
+            return new DesktopRunResult(RunStatus.Failed, $"{targetPeer} is offline.", 0, targetPeer);
+        }
+
+        return await RunOnRemotePeerAsync(targetPeer, text, conversationId, cancellationToken);
+    }
+
     public async Task<DesktopRunResult> RunAsync(string text, CancellationToken cancellationToken)
     {
         if (Settings.Chat.Mesh.IsEnabled
@@ -284,7 +304,7 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
             }
             else
             {
-                return await RunOnRemotePeerAsync(targetNode, remotePrompt, cancellationToken);
+                return await RunOnRemotePeerAsync(targetNode, remotePrompt, null, cancellationToken);
             }
         }
 
@@ -886,7 +906,11 @@ appTools,
         }
     }
 
-    private async Task<DesktopRunResult> RunOnRemotePeerAsync(string targetNode, string prompt, CancellationToken cancellationToken)
+    /// <param name="conversationId">A per-peer chat ID, or null to use the local chat's ID and its new-request flag.</param>
+    private async Task<DesktopRunResult> RunOnRemotePeerAsync(string targetNode,
+                                                              string prompt,
+                                                              string? conversationId,
+                                                              CancellationToken cancellationToken)
     {
         var tools = new List<string>();
         var node = _meshNode;
@@ -900,13 +924,18 @@ appTools,
             return failed;
         }
 
-        var force = _forceNewRequest;
-        _forceNewRequest = false;
+        // A per-peer chat starts over with a new ID, so it never consumes the local chat's new-request flag.
+        var force = conversationId is null && _forceNewRequest;
+        if (conversationId is null)
+        {
+            _forceNewRequest = false;
+        }
+
         try
         {
             var result = await node.RunRemoteTaskAsync(targetNode,
                                                        prompt,
-                                                       _conversationId,
+                                                       conversationId ?? _conversationId,
                                                        force,
                                                        tool =>
                                                        {

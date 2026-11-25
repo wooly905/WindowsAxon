@@ -60,6 +60,8 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
                                                                                                            info.FileName,
                                                                                                            info.SizeBytes,
                                                                                                            info.SavedPath));
+        // Deferred so the list is not rebuilt inside its own ItemClick handler.
+        ViewModel.UnreadChanged += () => DispatcherQueue.TryEnqueue(() => RefreshOnlinePeers(_service.OnlinePeers));
         ViewModel.PropertyChanged += (_, e) =>
         {
             // Deferred so the x:Bind IsEnabled update re-enables the TextBox first.

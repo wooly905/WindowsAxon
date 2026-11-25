@@ -15,34 +15,26 @@ public sealed partial class MainWindow
         OnlinePeersList.Items.Clear();
         if (!enabled)
         {
+            ViewModel.SelectConversation(null);
             RefreshMeshStatus();
             return;
         }
 
         var self = _service.EffectiveMeshNodeName;
-        foreach (var peer in peers)
+        var online = peers.Where(p => !IsSelf(p)).ToList();
+        var offline = ViewModel.PeersWithConversation
+            .Where(p => !IsSelf(p) && !online.Contains(p, StringComparer.OrdinalIgnoreCase))
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // The row for this computer opens the local chat.
+        AddPeerRow(self, $"{self} (this computer)", isOnline: true);
+        foreach (var peer in online)
         {
-            var isSelf = string.Equals(peer, self, StringComparison.OrdinalIgnoreCase);
-            var label = isSelf ? $"{peer} (this computer)" : peer;
-            var row = new StackPanel
-            {
-                Tag = peer,
-                Orientation = Orientation.Horizontal,
-                Spacing = 8,
-                Padding = new Thickness(0, 2, 0, 2),
-            };
-            row.Children.Add(new FontIcon { Glyph = "\uE7F8", FontSize = 12 });
-            row.Children.Add(new TextBlock { Text = label, TextTrimming = TextTrimming.CharacterEllipsis });
-            OnlinePeersList.Items.Add(new ListViewItem
-            {
-                Tag = peer,
-                Content = row,
-                MinHeight = 28,
-                Padding = new Thickness(6, 2, 6, 2),
-            });
+            AddPeerRow(peer, peer, isOnline: true);
         }
 
-        if (peers.Count == 0)
+        if (online.Count == 0)
         {
             OnlinePeersList.Items.Add(new ListViewItem
             {
@@ -57,7 +49,46 @@ public sealed partial class MainWindow
             });
         }
 
+        foreach (var peer in offline)
+        {
+            AddPeerRow(peer, $"{peer} (offline)", isOnline: false);
+        }
+
+        var active = ViewModel.ActivePeer ?? self;
+        OnlinePeersList.SelectedItem = OnlinePeersList.Items
+            .OfType<ListViewItem>()
+            .FirstOrDefault(item => item.Tag is string tag && string.Equals(tag, active, StringComparison.OrdinalIgnoreCase));
+
         RefreshMeshStatus();
+
+        bool IsSelf(string peer) => string.Equals(peer, self, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void AddPeerRow(string peer, string label, bool isOnline)
+    {
+        // ItemClick reports the item's Content, so the row needs the tag too.
+        var row = new StackPanel
+        {
+            Tag = peer,
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Padding = new Thickness(0, 2, 0, 2),
+            Opacity = isOnline ? 1 : 0.6,
+        };
+        row.Children.Add(new FontIcon { Glyph = "", FontSize = 12 });
+        row.Children.Add(new TextBlock { Text = label, TextTrimming = TextTrimming.CharacterEllipsis });
+        if (ViewModel.UnreadFor(peer) is > 0 and var unread)
+        {
+            row.Children.Add(new InfoBadge { Value = unread, VerticalAlignment = VerticalAlignment.Center });
+        }
+
+        OnlinePeersList.Items.Add(new ListViewItem
+        {
+            Tag = peer,
+            Content = row,
+            MinHeight = 28,
+            Padding = new Thickness(6, 2, 6, 2),
+        });
     }
 
     private void RefreshMeshStatus()
@@ -76,7 +107,9 @@ public sealed partial class MainWindow
     {
         if (e.ClickedItem is FrameworkElement { Tag: string peer })
         {
-            InsertInput($"@{peer} ");
+            var isSelf = string.Equals(peer, _service.EffectiveMeshNodeName, StringComparison.OrdinalIgnoreCase);
+            ViewModel.SelectConversation(isSelf ? null : peer);
+            CommandInput.Focus(FocusState.Programmatic);
         }
     }
 
