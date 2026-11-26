@@ -206,7 +206,8 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
     private bool _forceNewRequest;
 
     // Stdio MCP servers that the user allowed to start, by server, command, and arguments. Kept until the app exits.
-    private readonly HashSet<string> _allowedMcpPrograms = [];
+    // Remote sessions run on other threads, so local and remote runs can check this set at the same time.
+    private readonly ConcurrentDictionary<string, bool> _allowedMcpPrograms = new();
 
     public ModelSettings Settings { get; private set; } = WithDefaultMcpServers(new ModelSettings());
 
@@ -455,7 +456,7 @@ appTools,
             server.Command,
             server.Args
         });
-        if (_allowedMcpPrograms.Contains(key))
+        if (_allowedMcpPrograms.ContainsKey(key))
         {
             return true;
         }
@@ -478,7 +479,7 @@ appTools,
             return false;
         }
 
-        _allowedMcpPrograms.Add(key);
+        _allowedMcpPrograms.TryAdd(key, true);
         return true;
     }
 
@@ -1148,6 +1149,8 @@ appTools,
                                                    }));
             }
 
+            // Before toolNames: skills that list MCP tools need them in the catalog.
+            var mcpAgents = await AddMcpServersAsync(catalog, toolSet, cancellationToken);
             var audit = new ToolStartAuditLog(new JsonlAuditLog(Path.Combine(DataFolder, "logs")),
                                               tool =>
                                               {
@@ -1176,7 +1179,7 @@ appTools,
                                                                                new Uri(Settings.ChatEndpoint.BaseUrl).Host)
                                                      ],
                                                      new RemoteStepLimitPrompter(),
-                                                     []);
+                                                     mcpAgents);
             var session = await new AgentFactory(dependencies).CreateSessionAsync(cancellationToken);
             var runner = new AgentRunner(session, new RemoteApprovalPrompter(binding), audit);
             return (model, toolSet, runner);

@@ -1,4 +1,8 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using ModelContextProtocol.Server;
 using NSubstitute;
 using WindowsAxon.Agent.Approval;
 using WindowsAxon.Agent.Selection;
@@ -22,10 +26,77 @@ public sealed class RemoteConversationSessionTests
         Directory.CreateDirectory(tempDir);
         var approvals = Substitute.For<IApprovalPrompter>();
         var stepLimits = Substitute.For<IStepLimitPrompter>();
-        return new DesktopChatService(approvals,
-                                      stepLimits,
-                                      settingsPath: Path.Combine(tempDir, "settings.json"),
-                                      chatHistoryFolder: Path.Combine(tempDir, "history"));
+        var service = new DesktopChatService(approvals,
+                                             stepLimits,
+                                             settingsPath: Path.Combine(tempDir, "settings.json"),
+                                             chatHistoryFolder: Path.Combine(tempDir, "history"));
+        // Remote sessions connect to every enabled MCP server; keep tests off the network.
+        foreach (var server in service.Settings.Chat.McpServers.ToList())
+        {
+            service.DeleteMcpServer(server.Name);
+        }
+
+        return service;
+    }
+
+    [Fact]
+    public async Task RemoteSessionLoadsMcpToolsAndSkillsThatUseThem()
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddMcpServer()
+            .WithHttpTransport()
+            .WithTools([McpServerTool.Create((string text) => text, new McpServerToolCreateOptions { Name = "echo" })]);
+        await using var mcpHost = builder.Build();
+        mcpHost.MapMcp();
+        await mcpHost.StartAsync(Ct);
+
+        var skillFolder = Path.Combine(DesktopChatService.BuiltInSkillsFolder, "remote-mcp-test");
+        Directory.CreateDirectory(skillFolder);
+        File.WriteAllText(Path.Combine(skillFolder, "SKILL.md"),
+                          "---\nname: remote-mcp-test\ndescription: Echo through the fake MCP server.\nmetadata:\n  tools: \"mcp_fake_echo\"\n---\nSteps.\n");
+        using var service = CreateService(out var tempDir);
+        try
+        {
+            service.SaveMcpServer(new McpServerSettings
+            {
+                Name = "fake",
+                Description = "fake test server",
+                Url = mcpHost.Urls.First()
+            },
+                                  null);
+            var model = new ScriptedChatClient().Reply(Final("ok"));
+            service.RemoteModelFactory = _ => Task.FromResult<IChatClient>(model);
+
+            var result = await service.HandleIncomingRemoteTaskAsync(
+                new IncomingRemoteTask("task-1",
+                                       "Computer A",
+                                       "use the fake MCP server",
+                                       "conv-mcp",
+                                       ForceNewRequest: false,
+                                       _ => { },
+                                       (_, _) => Task.FromResult(RemoteApprovalAnswer.Deny)),
+                Ct);
+
+            Assert.Equal(RemoteRunStatus.Answered, result.Status);
+            var (messages, options) = model.Calls[0];
+            var allText = string.Join("\n",
+                                      [
+                                          options?.Instructions,
+                                          .. messages.Select(m => m.Text),
+                                          .. options?.Tools?.Select(t => $"{t.Name} {t.Description}") ?? []
+                                      ]);
+            Assert.Contains("mcp_fake", allText);
+            Assert.Contains("remote-mcp-test", allText);
+        }
+        finally
+        {
+            Directory.Delete(skillFolder, recursive: true);
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+        }
     }
 
     [Theory]

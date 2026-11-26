@@ -226,7 +226,10 @@ public sealed class BrowserToolsTests
         var context = await browser.NewContextAsync();
         var page = await context.NewPageAsync();
         await using var tools = Attach(context, page);
-        await page.SetContentAsync($"<iframe {(crossOrigin ? "sandbox='allow-scripts'" : "")} srcdoc=\"<input type='text'>\"></iframe>");
+        // A sandboxed srcdoc frame disconnects headless Edge, so the cross-origin frame loads a data: URL.
+        await page.SetContentAsync(crossOrigin
+                                       ? "<iframe sandbox='allow-scripts' src=\"data:text/html,<input type='text'>\"></iframe>"
+                                       : "<iframe srcdoc=\"<input type='text'>\"></iframe>");
         var input = page.FrameLocator("iframe").Locator("input");
         await input.FocusAsync();
 

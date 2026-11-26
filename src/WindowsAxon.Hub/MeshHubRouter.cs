@@ -12,6 +12,9 @@ public sealed class MeshHubRouter
     private readonly ConcurrentDictionary<string, ActiveRoute> _rpcs = new();
     private readonly ConcurrentDictionary<string, ActiveStreamRoute> _streams = new();
 
+    // Orders peer-list messages: a new node gets Registered before any PeersUpdated, and snapshots go out in order.
+    private readonly SemaphoreSlim _membership = new(1, 1);
+
     public IReadOnlyList<string> OnlineNodes =>
         [.. _nodes.Values.Select(n => n.Name).Order(StringComparer.OrdinalIgnoreCase)];
 
@@ -43,7 +46,25 @@ public sealed class MeshHubRouter
             var nodeId = string.IsNullOrWhiteSpace(register.NodeId) ? $"legacy-{Guid.NewGuid():N}" : register.NodeId.Trim();
             var capabilities = register.Capabilities ?? PeerCapabilities.Default;
             var node = new ConnectedNode(nodeName, nodeId, capabilities, DateTimeOffset.UtcNow, channel);
-            if (!_nodes.TryAdd(nodeName, node))
+            bool added;
+            await _membership.WaitAsync(cancellationToken);
+            try
+            {
+                added = _nodes.TryAdd(nodeName, node);
+                if (added)
+                {
+                    registeredName = nodeName;
+                    await channel.SendAsync(MeshEnvelope.Create(MeshMessageTypes.Registered,
+                                                                new RegisteredPayload(nodeName, OnlineNodes, OnlinePeerInfos)),
+                                            cancellationToken);
+                }
+            }
+            finally
+            {
+                _membership.Release();
+            }
+
+            if (!added)
             {
                 await TrySendAsync(channel,
                                    MeshEnvelope.Create(MeshMessageTypes.Error,
@@ -53,10 +74,6 @@ public sealed class MeshHubRouter
                 return;
             }
 
-            registeredName = nodeName;
-            await channel.SendAsync(MeshEnvelope.Create(MeshMessageTypes.Registered,
-                                                        new RegisteredPayload(nodeName, OnlineNodes, OnlinePeerInfos)),
-                                    cancellationToken);
             await BroadcastPeersAsync(excludeNode: nodeName, cancellationToken);
 
             while (!cancellationToken.IsCancellationRequested)
@@ -490,12 +507,20 @@ public sealed class MeshHubRouter
 
     private async Task BroadcastPeersAsync(string? excludeNode, CancellationToken cancellationToken)
     {
-        var envelope = MeshEnvelope.Create(MeshMessageTypes.PeersUpdated,
-                                           new PeersUpdatedPayload(OnlineNodes, OnlinePeerInfos));
-        var recipients = _nodes.Values
-            .Where(n => excludeNode is null || !string.Equals(n.Name, excludeNode, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        await Task.WhenAll(recipients.Select(n => TrySendAsync(n.Channel, envelope, cancellationToken)));
+        await _membership.WaitAsync(cancellationToken);
+        try
+        {
+            var envelope = MeshEnvelope.Create(MeshMessageTypes.PeersUpdated,
+                                               new PeersUpdatedPayload(OnlineNodes, OnlinePeerInfos));
+            var recipients = _nodes.Values
+                .Where(n => excludeNode is null || !string.Equals(n.Name, excludeNode, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            await Task.WhenAll(recipients.Select(n => TrySendAsync(n.Channel, envelope, cancellationToken)));
+        }
+        finally
+        {
+            _membership.Release();
+        }
     }
 
     private static async Task<bool> TrySendAsync(WebSocketJsonChannel channel,

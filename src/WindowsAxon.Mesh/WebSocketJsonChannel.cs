@@ -90,6 +90,10 @@ public sealed class WebSocketJsonChannel(WebSocket socket) : IDisposable
             catch (OperationCanceledException)
             {
             }
+            // The connection loop can dispose the socket after the state check.
+            catch (ObjectDisposedException)
+            {
+            }
         }
     }
 
