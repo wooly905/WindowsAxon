@@ -84,8 +84,8 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           $assets = @(
-            @{ Source = "publish/WindowsAxon.App.exe"; Target = "dist/WindowsAxon-$env:VERSION-win-x64.exe" }
-            @{ Source = "publish-hub/WindowsAxon.Hub.exe"; Target = "dist/WindowsAxon.Hub-$env:VERSION-win-x64.exe" }
+            @{ Source = "publish/WindowsAxon.App.exe"; Target = "dist/WindowsAxon.App.win-x64.exe" }
+            @{ Source = "publish-hub/WindowsAxon.Hub.exe"; Target = "dist/WindowsAxon.Hub.win-x64.exe" }
           )
           foreach ($asset in $assets) {
             Copy-Item $asset.Source $asset.Target

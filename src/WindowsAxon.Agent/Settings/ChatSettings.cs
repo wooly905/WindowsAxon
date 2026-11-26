@@ -5,7 +5,7 @@ public sealed record ChatSettings
 {
     public string Endpoint { get; init; } = "local";
 
-    public string Model { get; init; } = "windowsaxon-qwen3.5-9b";
+    public string Model { get; init; } = "auto";
 
     public int ContextWindow { get; init; } = 16384;
 
