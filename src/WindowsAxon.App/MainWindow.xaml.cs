@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using WindowsAxon.Agent;
 using WindowsAxon.Agent.Approval;
@@ -88,8 +89,10 @@ public sealed partial class MainWindow : Window, IApprovalPrompter, IStepLimitPr
         _pruneTimer.Start();
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1000, 900));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "WindowsAxon.ico"));
+
         if (Environment.ProcessPath is { } executable)
         {
+            FileVersionText.Text = FileVersionInfo.GetVersionInfo(executable).FileVersion ?? string.Empty;
             UpdateInstaller.CleanupOld(executable);
         }
 
