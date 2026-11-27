@@ -783,19 +783,30 @@ public sealed class WindowsToolsTests : IAsyncDisposable
         var draft = JsonSerializer.SerializeToElement(await scripts.Create("powershell",
                                                                            "wait",
                                                                            TestContext.Current.CancellationToken));
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var stop = new CancellationTokenSource();
         var running = scripts.Run(draft.GetProperty("Id").GetString()!, stop.Token);
-        for (var attempt = 0; attempt < 100 && !File.Exists(pidPath); attempt++)
+        try
         {
-            await Task.Delay(50, TestContext.Current.CancellationToken);
-        }
+            // Run starts powershell.exe twice (validation, then execution); cold starts on CI runners are slow.
+            var deadline = DateTime.UtcNow.AddSeconds(60);
+            while (!File.Exists(pidPath) && !running.IsCompleted && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(100, TestContext.Current.CancellationToken);
+            }
 
-        Assert.True(File.Exists(pidPath), "Script did not start.");
-        var processId = int.Parse(File.ReadAllText(pidPath).Trim());
-        using var process = System.Diagnostics.Process.GetProcessById(processId);
-        stop.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
-        Assert.True(process.WaitForExit(5000), "Stopped script process remained alive.");
+            Assert.True(File.Exists(pidPath), "Script did not start.");
+            var processId = int.Parse(File.ReadAllText(pidPath).Trim());
+            using var process = System.Diagnostics.Process.GetProcessById(processId);
+            stop.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
+            Assert.True(process.WaitForExit(5000), "Stopped script process remained alive.");
+        }
+        finally
+        {
+            // Never leave the script running: it holds the workspace folder that DisposeAsync deletes.
+            stop.Cancel();
+            await Task.WhenAny(running);
+        }
     }
 
     public async ValueTask DisposeAsync()
