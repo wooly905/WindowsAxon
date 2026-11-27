@@ -54,10 +54,21 @@ public sealed class ScriptTools(IChatClient model, string dataFolder, string ses
             CheckPowerShellPolicy();
         }
 
+        var target = "Windows PowerShell 5.1";
+        if (language == "python")
+        {
+            if (!File.Exists(Python))
+            {
+                throw new InvalidOperationException("Run python_ensure before creating Python scripts.");
+            }
+
+            target = (await WindowsCommand.RunAsync(Python, ["-I", "--version"], cancellationToken)).Trim();
+        }
+
         var response = await model.GetResponseAsync([
 new ChatMessage(ChatRole.System,
-                "Write a complete Windows current-user script for the task. Return only JSON with Code, Summary, Packages (string array). No tools, no user input, no infinite loops. Never request elevation, change execution policy, Defender, firewall, or security settings. Do not delete files; use a _backup folder when necessary. Do not access the network unless asked. Target Windows PowerShell 5.1 or Python 3.14. Write new files in the workspace unless the task names a folder."),
-            new ChatMessage(ChatRole.User, $"Language: {language}\nWorkspace: {Workspace}\nTask: {task}")
+                "Write a complete Windows current-user script for the task. Return only JSON with Code, Summary, Packages (string array). No tools, no user input, no infinite loops. Never request elevation, change execution policy, Defender, firewall, or security settings. Do not delete files; use a _backup folder when necessary. Do not access the network unless asked. Use only syntax and modules available in the target version. Write new files in the workspace unless the task names a folder."),
+            new ChatMessage(ChatRole.User, $"Language: {language}\nTarget: {target}\nWorkspace: {Workspace}\nTask: {task}")
 
 ],
                                                     new ChatOptions { Tools = null },
@@ -304,7 +315,7 @@ new ChatMessage(ChatRole.System,
 
     [Tool("python_ensure",
           "scripts",
-          "Find Python and create WindowsAxon's isolated virtual environment. If missing, installs Python.Python.3.14 via winget for the current user after approval. Accepts package/source licenses. Does not request elevation.",
+          "Find Python 3.11 or later and create WindowsAxon's isolated virtual environment. If missing, installs Python.Python.3.14 via winget for the current user after approval. Accepts package/source licenses. Does not request elevation.",
           RiskLevel.Danger,
           policyDriven: true,
           timeoutSeconds: 300)]
@@ -318,15 +329,16 @@ new ChatMessage(ChatRole.System,
         string? executable = null;
         try
         {
-            executable = await WindowsCommand.RunAsync("py.exe",
-                                                       ["-3", "-c", "import sys; print(sys.executable)"],
-                                                       cancellationToken);
+            // Python 3.10 and earlier are past end of support; an empty result falls back to the install below.
+            executable = (await WindowsCommand.RunAsync("py.exe",
+                                                        ["-3", "-c", "import sys; print(sys.executable if sys.version_info >= (3, 11) else '')"],
+                                                        cancellationToken)).Trim();
         }
         catch (Exception error) when (error is Win32Exception or InvalidOperationException)
         {
             // Python may be missing; the approved installation below is the fallback.
         }
-        if (executable is null)
+        if (string.IsNullOrEmpty(executable))
         {
             await WindowsCommand.RunAsync("winget.exe",
                                           [
