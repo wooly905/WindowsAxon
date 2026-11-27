@@ -61,32 +61,12 @@
                     <ListView x:Name="OnlinePeersList" Grid.Row="1" SelectionMode="Single" IsItemClickEnabled="True" ItemClick="OnlinePeersList_ItemClick" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" AutomationProperties.Name="Online computers" />
                 </Grid>
             </Border>
-            <StackPanel Grid.Row="2">
-                <Button Click="Skills_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" AutomationProperties.Name="Skills">
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <FontIcon Glyph="&#xE945;" FontSize="14" />
-                        <TextBlock Text="Skills" />
-                    </StackPanel>
-                </Button>
-                <Button Click="McpServers_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" AutomationProperties.Name="MCP servers">
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <FontIcon Glyph="&#xE968;" FontSize="14" />
-                        <TextBlock Text="MCP servers" />
-                    </StackPanel>
-                </Button>
-                <Button Click="Network_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" AutomationProperties.Name="Network">
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <FontIcon Glyph="&#xE774;" FontSize="14" />
-                        <TextBlock Text="Network" />
-                    </StackPanel>
-                </Button>
-                <Button Click="Settings_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" AutomationProperties.Name="Settings">
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <FontIcon Glyph="&#xE713;" FontSize="14" />
-                        <TextBlock Text="Settings" />
-                    </StackPanel>
-                </Button>
-            </StackPanel>
+            <Button Grid.Row="2" Click="Settings_Click" IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" AutomationProperties.Name="Settings">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <FontIcon Glyph="&#xE713;" FontSize="14" />
+                    <TextBlock Text="Settings" />
+                </StackPanel>
+            </Button>
         </Grid>
         <Grid Grid.Column="1" Padding="16" RowSpacing="12">
             <Grid.RowDefinitions>

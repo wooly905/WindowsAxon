@@ -209,7 +209,7 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
     // Remote sessions run on other threads, so local and remote runs can check this set at the same time.
     private readonly ConcurrentDictionary<string, bool> _allowedMcpPrograms = new();
 
-    public ModelSettings Settings { get; private set; } = WithDefaultMcpServers(new ModelSettings());
+    public ModelSettings Settings { get; private set; } = WithDefaultApprovalLevel(WithDefaultMcpServers(new ModelSettings()));
 
     public static string DefaultMcpServersPath => Path.Combine(AppContext.BaseDirectory, "default-mcp-servers.json");
 
@@ -223,10 +223,13 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
         {
             var json = File.ReadAllText(path);
             var settings = ModelSettings.Load(json);
+
             if (!HasMcpServers(json))
             {
                 settings = WithDefaultMcpServers(settings);
             }
+
+            settings = WithDefaultApprovalLevel(settings);
 
             ValidateEndpoint(settings.ChatEndpoint.BaseUrl);
             McpServerSettings.ValidateAll(settings.Chat.McpServers);
@@ -237,6 +240,22 @@ public sealed class DesktopChatService(IApprovalPrompter approvals,
         {
             throw new FileNotFoundException("The settings file does not exist.", path);
         }
+    }
+
+    private static ModelSettings WithDefaultApprovalLevel(ModelSettings settings)
+    {
+        if (settings.Chat.ApprovalLevel is not null)
+        {
+            return settings;
+        }
+
+        return settings with
+        {
+            Chat = settings.Chat with
+            {
+                ApprovalLevel = ApprovalLevel.All
+            }
+        };
     }
 
     /// <summary>A settings file without Models.Chat.McpServers gets the servers in default-mcp-servers.json. An empty list stays empty.</summary>

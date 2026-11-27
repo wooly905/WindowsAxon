@@ -11,11 +11,9 @@ public sealed partial class MainWindow
     private const string HttpTransport = "HTTP";
     private const string StdioTransport = "stdio (program on this computer)";
 
-    private async void McpServers_Click(object sender, RoutedEventArgs e)
+    private SettingsTabPanel CreateMcpTab()
     {
-        var dialog = new ContentDialog { Title = "MCP servers", CloseButtonText = "Close" };
-        dialog.Resources["ContentDialogMaxWidth"] = 820.0;
-        var list = new ListView { SelectionMode = ListViewSelectionMode.Single, MinHeight = 200, MaxHeight = 320 };
+        var list = new ListView { SelectionMode = ListViewSelectionMode.Single };
         var status = new TextBlock { TextWrapping = TextWrapping.Wrap };
         McpServerSettings? Selected() => (list.SelectedItem as ListViewItem)?.Tag as McpServerSettings;
 
@@ -27,13 +25,28 @@ public sealed partial class MainWindow
         confirm.Children.Add(Row(confirmYes, confirmNo));
         confirmNo.Click += (_, _) => confirm.Visibility = Visibility.Collapsed;
 
-        var listPanel = new StackPanel { Spacing = 12 };
-        var editorPanel = new StackPanel { Spacing = 12, Visibility = Visibility.Collapsed };
+        var listViewRoot = new Grid { RowSpacing = 12 };
+        listViewRoot.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        listViewRoot.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        listViewRoot.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var editorHeading = SectionHeading("MCP server");
+        var editorFields = new StackPanel { Spacing = 12 };
+
+        var saveButton = new Button
+        {
+            Content = "Save",
+            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+        };
+        var backButton = new Button { Content = "Back" };
+        var editorViewRoot = CreateScrollableTab(editorFields, ActionFooter(Row(saveButton, backButton)));
+        editorViewRoot.Visibility = Visibility.Collapsed;
 
         void ShowList(string? select = null, string? message = null)
         {
             confirm.Visibility = Visibility.Collapsed;
             list.Items.Clear();
+
             foreach (var server in _service.Settings.Chat.McpServers)
             {
                 var toggle = new ToggleSwitch
@@ -66,6 +79,7 @@ public sealed partial class MainWindow
                 row.Children.Add(toggle);
                 var item = new ListViewItem { Tag = server, Content = row, HorizontalContentAlignment = HorizontalAlignment.Stretch };
                 list.Items.Add(item);
+
                 if (server.Name == select)
                 {
                     list.SelectedItem = item;
@@ -73,10 +87,8 @@ public sealed partial class MainWindow
             }
 
             status.Text = message ?? (list.Items.Count == 0 ? "No MCP servers. Select New to add one." : "");
-            editorPanel.Visibility = Visibility.Collapsed;
-            listPanel.Visibility = Visibility.Visible;
-            dialog.PrimaryButtonText = "";
-            dialog.SecondaryButtonText = "";
+            editorViewRoot.Visibility = Visibility.Collapsed;
+            listViewRoot.Visibility = Visibility.Visible;
         }
 
         var name = new TextBox { Header = "Name", PlaceholderText = "Lowercase letters and digits, for example microsoftlearn" };
@@ -124,6 +136,7 @@ public sealed partial class MainWindow
         var headerStatus = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12 };
         var editorError = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = ErrorBrush() };
         var httpFields = new StackPanel { Spacing = 12 };
+
         foreach (var child in new UIElement[] { url, headerName, headerValue, headerStatus })
         {
             httpFields.Children.Add(child);
@@ -144,11 +157,25 @@ public sealed partial class MainWindow
             httpFields.Visibility = http ? Visibility.Visible : Visibility.Collapsed;
             stdioFields.Visibility = http ? Visibility.Collapsed : Visibility.Visible;
         };
-        foreach (var child in new UIElement[] { editorError, name, description, transport, httpFields, stdioFields, tools, autoApprove, autoApproveNote })
+
+        foreach (var child in new UIElement[]
+                 {
+                     editorHeading,
+                     editorError,
+                     name,
+                     description,
+                     transport,
+                     httpFields,
+                     stdioFields,
+                     tools,
+                     autoApprove,
+                     autoApproveNote,
+                 })
         {
-            editorPanel.Children.Add(child);
+            editorFields.Children.Add(child);
         }
-        editorPanel.Children.Add(new TextBlock
+
+        editorFields.Children.Add(new TextBlock
         {
             Text = "Tool results go to the model endpoint.",
             TextWrapping = TextWrapping.Wrap,
@@ -156,10 +183,12 @@ public sealed partial class MainWindow
         });
 
         string? editing = null;
+
         void ShowEditor(McpServerSettings? server)
         {
             confirm.Visibility = Visibility.Collapsed;
             editing = server?.Name;
+            editorHeading.Text = server is null ? "New MCP server" : "Edit MCP server";
             name.Text = server?.Name ?? "";
             description.Text = server?.Description ?? "";
             transport.SelectedItem = server?.Command is not null ? StdioTransport : HttpTransport;
@@ -175,22 +204,19 @@ public sealed partial class MainWindow
                 ? "A header value is saved. Leave the value blank to keep it for the same URL, or enter a replacement. Clear the name to remove the header."
                 : "Headers need HTTPS, except for localhost.";
             editorError.Text = "";
-            listPanel.Visibility = Visibility.Collapsed;
-            editorPanel.Visibility = Visibility.Visible;
-            dialog.PrimaryButtonText = "Save";
-            dialog.SecondaryButtonText = "Back";
+            listViewRoot.Visibility = Visibility.Collapsed;
+            editorViewRoot.Visibility = Visibility.Visible;
         }
 
         static List<string> Split(string text, params char[] separators) =>
             [.. text.Split(separators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
 
-        dialog.DefaultButton = ContentDialogButton.Primary;
-        dialog.PrimaryButtonClick += (_, args) =>
+        saveButton.Click += (_, _) =>
         {
-            args.Cancel = true;
             if (string.IsNullOrWhiteSpace(description.Text))
             {
                 editorError.Text = "Enter a description. The model chooses an MCP server only by its name and description, so name the topics and data the server covers.";
+
                 return;
             }
 
@@ -206,6 +232,7 @@ public sealed partial class MainWindow
                 AutoApprove = autoApprove.IsChecked == true,
                 Enabled = _service.Settings.Chat.McpServers.FirstOrDefault(s => s.Name == editing)?.Enabled ?? true,
             };
+
             try
             {
                 _service.SaveMcpServer(server, editing, http ? headerName.Text : "", http ? headerValue.Password : "");
@@ -217,9 +244,8 @@ public sealed partial class MainWindow
                 editorError.Text = ex.Message;
             }
         };
-        dialog.SecondaryButtonClick += (_, args) =>
+        backButton.Click += (_, _) =>
         {
-            args.Cancel = true;
             headerValue.Password = "";
             ShowList(editing);
         };
@@ -246,6 +272,7 @@ public sealed partial class MainWindow
         delete.Click += (_, _) =>
         {
             pendingDelete = Selected();
+
             if (pendingDelete is null)
             {
                 return;
@@ -257,6 +284,7 @@ public sealed partial class MainWindow
         confirmYes.Click += (_, _) =>
         {
             confirm.Visibility = Visibility.Collapsed;
+
             if (pendingDelete is null || Selected() != pendingDelete)
             {
                 return;
@@ -273,23 +301,33 @@ public sealed partial class MainWindow
             }
         };
 
-        listPanel.Children.Add(new TextBlock
+        var listHeader = new StackPanel { Spacing = 8 };
+        listHeader.Children.Add(SectionHeading("MCP servers"));
+        listHeader.Children.Add(new TextBlock
         {
             Text = "WindowsAxon connects to the servers that are on when a chat starts and gives their tools to the agent. Changes apply to new chats.",
             TextWrapping = TextWrapping.Wrap,
         });
-        listPanel.Children.Add(list);
-        listPanel.Children.Add(Row(add, edit, delete));
-        listPanel.Children.Add(confirm);
-        listPanel.Children.Add(status);
-        var content = new StackPanel { Width = 720 };
-        content.Children.Add(listPanel);
-        content.Children.Add(editorPanel);
-        dialog.Content = new ScrollViewer { Content = content, MaxHeight = 560 };
+
+        var listFooter = new StackPanel { Spacing = 8 };
+        listFooter.Children.Add(Row(add, edit, delete));
+        listFooter.Children.Add(confirm);
+        listFooter.Children.Add(status);
+
+        Grid.SetRow(list, 1);
+        Grid.SetRow(listFooter, 2);
+        listViewRoot.Children.Add(listHeader);
+        listViewRoot.Children.Add(list);
+        listViewRoot.Children.Add(listFooter);
+
+        var root = new Grid();
+        root.Children.Add(listViewRoot);
+        root.Children.Add(editorViewRoot);
+
         ShowList();
         UpdateButtons();
-        await ShowDialogAsync(dialog, CancellationToken.None);
-        headerValue.Password = "";
+
+        return new SettingsTabPanel(root, Cleanup: () => headerValue.Password = "");
     }
 
     private static StackPanel McpRowContent(McpServerSettings server)
@@ -304,6 +342,7 @@ public sealed partial class MainWindow
             TextWrapping = TextWrapping.Wrap,
             FontSize = 12,
         });
+
         return panel;
     }
 }

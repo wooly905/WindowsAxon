@@ -96,6 +96,26 @@ public sealed class DesktopSettingsTests : IDisposable
     }
 
     [Fact]
+    public void Approval_level_defaults_to_all_and_preserves_explicit_choice()
+    {
+        using var fresh = CreateService();
+
+        Assert.Equal(ApprovalLevel.All, fresh.Settings.Chat.ResolveApprovalLevel());
+
+        var path = WriteSettings("""{ "Models": { "Chat": { "Model": "m" } } }""");
+        using var loadedWithoutLevel = CreateService(path);
+        loadedWithoutLevel.LoadSettings();
+
+        Assert.Equal(ApprovalLevel.All, loadedWithoutLevel.Settings.Chat.ResolveApprovalLevel());
+
+        loadedWithoutLevel.SaveApprovalLevel(ApprovalLevel.Read);
+        using var reloaded = CreateService(path);
+        reloaded.LoadSettings();
+
+        Assert.Equal(ApprovalLevel.Read, reloaded.Settings.Chat.ResolveApprovalLevel());
+    }
+
+    [Fact]
     public void Mcp_server_add_rename_and_delete_persist()
     {
         using var service = CreateService();

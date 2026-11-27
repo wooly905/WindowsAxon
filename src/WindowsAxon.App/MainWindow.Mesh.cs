@@ -113,7 +113,7 @@ public sealed partial class MainWindow
         }
     }
 
-    private async void Network_Click(object sender, RoutedEventArgs e)
+    private SettingsTabPanel CreateNetworkTab()
     {
         var mesh = _service.Settings.Chat.Mesh;
         var modeSelector = new RadioButtons
@@ -151,15 +151,11 @@ public sealed partial class MainWindow
         var pairKey = new PasswordBox
         {
             Header = "Pair key",
-            PlaceholderText = string.IsNullOrEmpty(mesh.PairKey)
-                ? "Enter the same pair key on every computer in this LAN"
-                : "Leave blank to keep saved pair key",
             PasswordRevealMode = PasswordRevealMode.Peek,
         };
         var removePairKey = new CheckBox
         {
             Content = "Remove saved pair key",
-            Visibility = string.IsNullOrEmpty(mesh.PairKey) ? Visibility.Collapsed : Visibility.Visible,
         };
         removePairKey.Checked += (_, _) =>
         {
@@ -189,13 +185,11 @@ public sealed partial class MainWindow
         var token = new PasswordBox
         {
             Header = "Hub token",
-            PlaceholderText = string.IsNullOrEmpty(mesh.Token) ? "Optional" : "Leave blank to keep saved token",
             PasswordRevealMode = PasswordRevealMode.Hidden,
         };
         var removeToken = new CheckBox
         {
             Content = "Remove saved hub token",
-            Visibility = string.IsNullOrEmpty(mesh.Token) ? Visibility.Collapsed : Visibility.Visible,
         };
         removeToken.Checked += (_, _) =>
         {
@@ -208,6 +202,20 @@ public sealed partial class MainWindow
         hubPanel.Children.Add(hubUrl);
         hubPanel.Children.Add(token);
         hubPanel.Children.Add(removeToken);
+
+        void RefreshSecretIndicators(MeshSettings current)
+        {
+            pairKey.PlaceholderText = string.IsNullOrEmpty(current.PairKey)
+                ? "Enter the same pair key on every computer in this LAN"
+                : "Leave blank to keep saved pair key";
+            removePairKey.Visibility = string.IsNullOrEmpty(current.PairKey) ? Visibility.Collapsed : Visibility.Visible;
+            token.PlaceholderText = string.IsNullOrEmpty(current.Token)
+                ? "Optional"
+                : "Leave blank to keep saved token";
+            removeToken.Visibility = string.IsNullOrEmpty(current.Token) ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        RefreshSecretIndicators(mesh);
 
         MeshMode SelectedMode() => modeSelector.SelectedIndex switch
         {
@@ -238,28 +246,27 @@ public sealed partial class MainWindow
 
         _service.MeshStateChanged += OnStateChanged;
 
-        var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
         var content = new StackPanel { Spacing = 12 };
+        content.Children.Add(SectionHeading("Network (Distributed WindowsAxon)"));
         content.Children.Add(modeSelector);
         content.Children.Add(standaloneHint);
         content.Children.Add(nodeName);
         content.Children.Add(p2pPanel);
         content.Children.Add(hubPanel);
         content.Children.Add(statusText);
-        content.Children.Add(error);
 
-        var dialog = new ContentDialog
+        var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        var saveButton = new Button
         {
-            Title = "Network (Distributed WindowsAxon)",
-            Content = new ScrollViewer { Content = content, MaxHeight = 520 },
-            PrimaryButtonText = "Save",
-            CloseButtonText = "Close",
-            DefaultButton = ContentDialogButton.Primary,
+            Content = "Save",
+            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+            HorizontalAlignment = HorizontalAlignment.Left,
         };
 
-        dialog.PrimaryButtonClick += (_, args) =>
+        saveButton.Click += (_, _) =>
         {
-            error.Text = "";
+            SetFeedback(feedback, "", isError: false);
+
             try
             {
                 var mode = SelectedMode();
@@ -270,6 +277,11 @@ public sealed partial class MainWindow
                                           removeToken.IsChecked == true,
                                           pairKey.Password,
                                           removePairKey.IsChecked == true);
+                token.Password = "";
+                pairKey.Password = "";
+                removeToken.IsChecked = false;
+                removePairKey.IsChecked = false;
+                RefreshSecretIndicators(_service.Settings.Chat.Mesh);
                 RefreshOnlinePeers(_service.OnlinePeers);
                 RefreshMeshStatus();
                 ViewModel.AddEvent(mode switch
@@ -278,23 +290,22 @@ public sealed partial class MainWindow
                     MeshMode.CentralServer => $"Central server mode enabled as '{_service.EffectiveMeshNodeName}' ({_service.Settings.Chat.Mesh.HubUrl}).",
                     _ => "Network disabled (standalone mode).",
                 });
+                SetFeedback(feedback, "Network settings saved.", isError: false);
             }
             catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
             {
-                error.Text = ex.Message;
-                args.Cancel = true;
+                SetFeedback(feedback, ex.Message, isError: true);
             }
         };
 
-        try
-        {
-            await ShowDialogAsync(dialog, CancellationToken.None);
-        }
-        finally
-        {
-            _service.MeshStateChanged -= OnStateChanged;
-            token.Password = "";
-            pairKey.Password = "";
-        }
+        var panel = CreateScrollableTab(content, ActionFooter(feedback, saveButton));
+
+        return new SettingsTabPanel(panel,
+                                    Cleanup: () =>
+                                    {
+                                        _service.MeshStateChanged -= OnStateChanged;
+                                        token.Password = "";
+                                        pairKey.Password = "";
+                                    });
     }
 }
