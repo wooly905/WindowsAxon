@@ -17,6 +17,9 @@ public sealed class ScriptTools(IChatClient model, string dataFolder, string ses
 
     private sealed record Script(string Path, string Language, string Hash, string Summary);
 
+    // Approval reads the full code from the file; the model only needs a preview.
+    private const int MaxReturnedCode = 2000;
+
     private readonly Dictionary<string, Script> _scripts = [];
 
     internal ScriptElevation Elevation { get; init; } = ScriptElevation.Default(dataFolder);
@@ -39,8 +42,8 @@ public sealed class ScriptTools(IChatClient model, string dataFolder, string ses
 
     [Tool("script_create",
           "scripts",
-          "Generate a PowerShell or Python script for a task that other tools cannot perform. Checks syntax and saves it for review; does not execute it. Returns its ID, summary, packages, and code.",
-          timeoutSeconds: 120,
+          "Generate a PowerShell or Python script for a task that other tools cannot perform. Checks syntax and saves it for review; does not execute it. Returns its ID, summary, packages, path, and the first 2000 characters of its code.",
+          timeoutSeconds: 300,
           artifact: true)]
     public async Task<object> Create(string language, string task, CancellationToken cancellationToken)
     {
@@ -71,8 +74,13 @@ new ChatMessage(ChatRole.System,
             new ChatMessage(ChatRole.User, $"Language: {language}\nTarget: {target}\nWorkspace: {Workspace}\nTask: {task}")
 
 ],
-                                                    new ChatOptions { Tools = null },
+                                                    new ChatOptions { Tools = null, MaxOutputTokens = 16384 },
                                                     cancellationToken);
+        if (response.FinishReason == ChatFinishReason.Length)
+        {
+            throw new InvalidOperationException("ScriptWriter output was cut off at the output token limit. Split the task into smaller scripts.");
+        }
+
         var json = response.Text.Trim();
         if (json.StartsWith("```"))
         {
@@ -105,7 +113,9 @@ new ChatMessage(ChatRole.System,
             Id = id,
             draft.Summary,
             draft.Packages,
-            Code = draft.Code,
+            Code = draft.Code.Length <= MaxReturnedCode
+                ? draft.Code
+                : draft.Code[..MaxReturnedCode] + $"\n... ({draft.Code.Length - MaxReturnedCode} more characters in Path)",
             Path = path,
             Executed = false
         };

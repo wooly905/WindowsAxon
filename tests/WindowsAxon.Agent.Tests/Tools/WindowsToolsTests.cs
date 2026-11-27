@@ -693,6 +693,41 @@ public sealed class WindowsToolsTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_long_script_returns_a_code_preview_and_keeps_the_full_file()
+    {
+        var code = string.Join('\n', Enumerable.Repeat("Write-Output 'line'", 500));
+        var scripts = new ScriptTools(Writer(code), _folder, "test");
+        var draft = JsonSerializer.SerializeToElement(await scripts.Create("powershell",
+                                                                           "long",
+                                                                           TestContext.Current.CancellationToken));
+        var preview = draft.GetProperty("Code").GetString()!;
+        Assert.True(preview.Length < 2100);
+        Assert.Contains("more characters in Path", preview);
+        Assert.Equal(code, File.ReadAllText(draft.GetProperty("Path").GetString()!));
+    }
+
+    [Fact]
+    public async Task A_truncated_script_draft_reports_the_token_limit()
+    {
+        var model = Substitute.For<IChatClient>();
+        model.GetResponseAsync(Arg.Any<IEnumerable<ChatMessage>>(),
+                               Arg.Any<ChatOptions?>(),
+                               Arg.Any<CancellationToken>())
+            .Returns(new ChatResponse(new ChatMessage(ChatRole.Assistant, "{\"Code\":\"Write-Output 'cut"))
+            {
+                FinishReason = ChatFinishReason.Length
+            });
+        var scripts = new ScriptTools(model, _folder, "test");
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => scripts.Create("powershell",
+                                                                                             "long",
+                                                                                             TestContext.Current.CancellationToken));
+        Assert.Contains("token limit", error.Message);
+        await model.Received().GetResponseAsync(Arg.Any<IEnumerable<ChatMessage>>(),
+                                                Arg.Is<ChatOptions?>(o => o!.MaxOutputTokens == 16384),
+                                                Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Script_output_includes_standard_error_and_failures_are_saved()
     {
         var scripts = new ScriptTools(Writer("[Console]::Error.WriteLine('diagnostic'); Write-Output 'ok'"),

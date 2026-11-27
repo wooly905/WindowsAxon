@@ -86,6 +86,7 @@ public static class SubAgentCatalog
             [
                 "Create the script with script_create, then run it with script_run.",
                 "A script exit code of 0 confirms only script completion, not that an application opened.",
+                "A script that restarts a service must print the process ID or start time before and after, and report the restart as failed if they did not change.",
                 "Call script_run with elevated true only when the change needs administrator rights or the user explicitly asks to run the script as administrator; Windows then asks the user to approve it.",
             ]),
     ];

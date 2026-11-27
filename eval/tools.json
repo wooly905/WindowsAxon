@@ -373,5 +373,57 @@
       ]
     },
     "output": "The processor is soldered and cannot be upgraded."
+  },
+  {
+    "name": "ui_list_windows",
+    "group": "desktop_ui",
+    "alwaysInclude": true,
+    "risk": "Read",
+    "description": "Find visible top-level windows by process name or title.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "output": "1. Settings (ApplicationFrameHost) id: w1"
+  },
+  {
+    "name": "ui_close_window",
+    "group": "desktop_ui",
+    "risk": "Change",
+    "description": "Close one window by its ID from ui_list_windows.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "windowId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "windowId"
+      ]
+    },
+    "output": "Closed window: Settings. The window's closure was verified."
+  },
+  {
+    "name": "ui_screenshot",
+    "group": "desktop_ui",
+    "risk": "Read",
+    "description": "Capture an image of one window ID from ui_list_windows.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "windowId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "windowId"
+      ]
+    },
+    "output": "Screenshot captured."
   }
 ]

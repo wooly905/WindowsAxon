@@ -26,6 +26,8 @@ public static class Prompts
             "If a script fails because of its own error, fix the task and create a new script. If PowerShell is blocked by policy or lacks permission, open the app or Settings window, enable desktop_ui, find the window with ui_list_windows, take a ui_snapshot, and use ui_click, ui_type, or ui_press_keys.",
             "A script exit code of 0 confirms only script completion, not that an application opened. Successful scripts may leave child processes running. Use a dedicated launch tool and verify its result before claiming a window is open.",
             "Call script_run with elevated true only when the change needs administrator rights or the user explicitly asks to run the script as administrator; Windows then asks the user to approve it. Keep elevated false for all other scripts.",
+            BackgroundWorkRule,
+            StaleWindowRule,
         ];
 
         rules.Add(stepMode == StepMode.Structured
@@ -60,6 +62,8 @@ public static class Prompts
             "To open a program, use app_find, then app_launch. Open it before you delegate work inside its window.",
             "If an agent needs information from the user, ask the user, then delegate again with the answer.",
             "Report an action as completed only when the agent's answer or actions confirm success.",
+            BackgroundWorkRule,
+            StaleWindowRule,
         ];
 
         AddEndRules(rules, stepMode);
@@ -105,6 +109,12 @@ public static class Prompts
             ? "When you have the answer, use final_answer. Write the answer in the same language as the user's request."
             : "When you have the answer, reply directly to the user in the same language as the user's request.");
     }
+
+    private const string BackgroundWorkRule =
+        "A request to start background work, such as a scan or a service restart, is not a result. Wait, then check a value that proves the work finished, such as a newer timestamp, a new event, or a new process ID or start time.";
+
+    private const string StaleWindowRule =
+        "If a window or Settings page shows a state that differs from what the system reports, find the cache or service that the page reads, refresh it, and check that its timestamp changed. Close the page before the refresh and open it again after the refresh is done. Do not suggest a restart before you do this.";
 
     private static string[] When(bool condition, string rule) => condition ? [rule] : [];
 
